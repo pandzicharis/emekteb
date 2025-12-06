@@ -1,0 +1,21 @@
+{
+  "name": "emekteb",
+  "version": "0.0.1",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "start:api": "npm run start:dev --workspace=@emekteb/api",
+    "start:web": "npm run dev --workspace=@emekteb/web",
+    "build:api": "npm run build --workspace=@emekteb/api",
+    "build:web": "npm run build --workspace=@emekteb/web"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}
+
