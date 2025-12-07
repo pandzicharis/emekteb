@@ -2,10 +2,211 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-    provider = "prisma-client-js"
+    provider      = "prisma-client-js"
+    binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
 }
 
 datasource db {
     provider = "postgresql"
-    url      = env("DATABASE_URL")
+    url      = "postgresql://postgres:postgres@postgres:5432/emekteb?schema=public"
+}
+
+// ============================================
+// KORISNICI I AUTENTIFIKACIJA
+// ============================================
+
+model Korisnik {
+    id       String   @id @default(uuid())
+    email    String?  @unique
+    ime      String?
+    prezime  String?
+    uloga    Uloga    @default(UCENIK)
+    aktivan  Boolean  @default(true)
+    kreiran  DateTime @default(now())
+    azuriran DateTime @updatedAt
+
+    // Relacije
+    ucenik Ucenik?
+
+    @@map("korisnici")
+}
+
+enum Uloga {
+    UCENIK
+    MUALLIM
+}
+
+// ============================================
+// UČENICI - OSNOVNE TABELE
+// ============================================
+
+model Ucenik {
+    id         String  @id @default(uuid())
+    korisnikId String? @unique
+    eksterniId Int?    @unique // ID iz eksternog sistema
+
+    // Osnovni podaci
+    datumRodjenja    DateTime?
+    spol             Spol?
+    mjestoRodjenja   String?
+    adresaStanovanja String?
+
+    // Status
+    status                StatusUcenika?
+    eksterniDatumKreiran  DateTime?
+    eksterniDatumAzuriran DateTime?
+
+    // Greške pri importu
+    greske Json? // JSON sa greškama za svako polje
+
+    // Porodični podaci
+    imaRoditelje        String? // "Oba", "Majke", "Oca", itd.
+    roditeljiZajedno    String? // "Da", "Ne"
+    roditeljiRazdvojeni String? // "Da", "Ne"
+    roditeljiClanoviIz  String? // "Majke", "Oca", itd.
+    brojBrace           Int?    @default(0)
+    brojSestara         Int?    @default(0)
+
+    // Stambeni objekat
+    tipStambenogObjekta String? // "Stan", "Kuća", "Podstanar"
+
+    // Posebne potrebe
+    imaPosebnePotrebe  Boolean @default(false)
+    posebnePotrebeOpis String?
+
+    // Džemat
+    idPunktaDzemata Int?
+
+    // Dodatni podaci
+    clanMrezeMladih  String?
+    ucenikSkoleHifza String?
+
+    // Relacije
+    korisnik    Korisnik?    @relation(fields: [korisnikId], references: [id], onDelete: Cascade)
+    obrazovanje Obrazovanje?
+    roditelji   Roditelj[]
+    kontakti    Kontakt[]
+
+    @@map("ucenici")
+}
+
+enum Spol {
+    MUSKO
+    ZENSKO
+}
+
+enum StatusUcenika {
+    AKTIVAN
+    ARHIVIRAN
+}
+
+// ============================================
+// OBRAZOVANJE - PODACI O OBRAZOVANJU
+// ============================================
+
+model Obrazovanje {
+    id       String @id @default(uuid())
+    ucenikId String @unique
+
+    // Nivo obrazovanja
+    nivoObrazovanja String? // "Osnovna škola", "Srednja škola"
+    razred          Int?
+    mektebStepen    String?
+
+    // Škole
+    predskolskaNaziv String?
+    osnovnaNaziv     String?
+    srednjaNaziv     String?
+    fakultetNaziv    String?
+
+    kreiran  DateTime @default(now())
+    azuriran DateTime @updatedAt
+
+    // Relacije
+    ucenik Ucenik @relation(fields: [ucenikId], references: [id], onDelete: Cascade)
+
+    @@map("obrazovanje")
+}
+
+// ============================================
+// RODITELJI - PODACI O RODITELJIMA
+// ============================================
+
+model Roditelj {
+    id             String       @id @default(uuid())
+    ucenikId       String
+    tip            TipRoditelja
+    imePrezime     String
+    datumRodjenja  DateTime?
+    mjestoRodjenja String?
+    email          String?
+    mobitel        String?
+    telefon        String?
+    zaposlen       Boolean?     @default(false)
+    obrazovanje    String? // "VSS - VII stepen", "SSS - IV stepen", itd.
+    zanimanje      String?
+    kreiran        DateTime     @default(now())
+    azuriran       DateTime     @updatedAt
+
+    // Relacije
+    ucenik Ucenik @relation(fields: [ucenikId], references: [id], onDelete: Cascade)
+
+    @@map("roditelji")
+}
+
+enum TipRoditelja {
+    MAJKA
+    OTAC
+}
+
+// ============================================
+// KONTAKTI (Telefoni, Email)
+// ============================================
+
+model Kontakt {
+    id         String      @id @default(uuid())
+    ucenikId   String
+    tip        TipKontakta
+    vrijednost String
+    primarni   Boolean     @default(false)
+    kreiran    DateTime    @default(now())
+    azuriran   DateTime    @updatedAt
+
+    // Relacije
+    ucenik Ucenik @relation(fields: [ucenikId], references: [id], onDelete: Cascade)
+
+    @@map("kontakti")
+}
+
+enum TipKontakta {
+    TELEFON
+    MOBITEL
+    EMAIL
+}
+
+// ============================================
+// IMPORTS - PRAĆENJE CSV IMPORTA
+// ============================================
+
+model Import {
+    id               String        @id @default(uuid())
+    nazivFajla       String
+    status           StatusImporta @default(U_TOKU)
+    ukupnoRedova     Int           @default(0)
+    uspjesnoSacuvano Int           @default(0)
+    novih            Int           @default(0)
+    updateanih       Int           @default(0)
+    gresaka          Int           @default(0)
+    logovi           Json? // JSON sa detaljnim logovima
+    kreiran          DateTime      @default(now())
+    azuriran         DateTime      @updatedAt
+
+    @@map("imports")
+}
+
+enum StatusImporta {
+    U_TOKU
+    USPJESAN
+    NEUSPJESAN
+    DJELOMICNO_USPJESAN
 }

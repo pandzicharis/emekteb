@@ -1,0 +1,122 @@
+{
+  "transformations": {
+    "ucenik_spol": {
+      "type": "enum",
+      "mapping": {
+        "Muško": "MUSKO",
+        "Žensko": "ZENSKO",
+        "MUSKO": "MUSKO",
+        "ZENSKO": "ZENSKO",
+        "Musko": "MUSKO",
+        "Zensko": "ZENSKO",
+        "muško": "MUSKO",
+        "žensko": "ZENSKO",
+        "musko": "MUSKO",
+        "zensko": "ZENSKO",
+        "M": "MUSKO",
+        "Ž": "ZENSKO",
+        "Z": "ZENSKO"
+      }
+    },
+    "status": {
+      "type": "enum",
+      "mapping": {
+        "Aktivan": "AKTIVAN",
+        "Arhiviran": "ARHIVIRAN",
+        "AKTIVAN": "AKTIVAN",
+        "ARHIVIRAN": "ARHIVIRAN",
+        "aktivan": "AKTIVAN",
+        "arhiviran": "ARHIVIRAN",
+        "Aktivan": "AKTIVAN",
+        "Arhiviran": "ARHIVIRAN",
+        "Active": "AKTIVAN",
+        "Inactive": "ARHIVIRAN",
+        "active": "AKTIVAN",
+        "inactive": "ARHIVIRAN"
+      }
+    },
+    "ucenik_posebnim_potrebama": {
+      "type": "boolean",
+      "mapping": {
+        "empty": false,
+        "any": true
+      }
+    },
+    "majka_zaposlenost": {
+      "type": "boolean",
+      "mapping": {
+        "Da": true,
+        "Ne": false,
+        "empty": false
+      }
+    },
+    "otac_zaposlenost": {
+      "type": "boolean",
+      "mapping": {
+        "Da": true,
+        "Ne": false,
+        "empty": false
+      }
+    }
+  },
+  "specialFields": {
+    "majka_ime_prezime": {
+      "targetTable": "Roditelj",
+      "targetField": "imePrezime",
+      "additionalData": {
+        "tip": "MAJKA"
+      }
+    },
+    "otac_ime_prezime": {
+      "targetTable": "Roditelj",
+      "targetField": "imePrezime",
+      "additionalData": {
+        "tip": "OTAC"
+      }
+    },
+    "kontakt_telefon": {
+      "targetTable": "Kontakt",
+      "targetField": "vrijednost",
+      "additionalData": {
+        "tip": "TELEFON"
+      }
+    },
+    "kontakt_mobitel": {
+      "targetTable": "Kontakt",
+      "targetField": "vrijednost",
+      "additionalData": {
+        "tip": "MOBITEL"
+      }
+    },
+    "kontakt_email": {
+      "targetTable": "Kontakt",
+      "targetField": "vrijednost",
+      "additionalData": {
+        "tip": "EMAIL"
+      }
+    }
+  },
+  "dataTypes": {
+    "id": "int",
+    "ucenik_datum_rodjenja": "datetime",
+    "date_created": "datetime",
+    "date_updated": "datetime",
+    "broj_brace": "int",
+    "broj_sestara": "int",
+    "id_punkta_dzemata": "int",
+    "os_razred": "int",
+    "majka_datum_rodjenja": "datetime",
+    "otac_datum_rodjenja": "datetime"
+  },
+  "defaults": {
+    "broj_brace": 0,
+    "broj_sestara": 0,
+    "Korisnik.uloga": "UCENIK",
+    "Korisnik.aktivan": true,
+    "Ucenik.status": "AKTIVAN",
+    "Ucenik.imaPosebnePotrebe": false,
+    "Roditelj.zaposlen": false,
+    "Kontakt.primarni": false
+  }
+}
+

@@ -1,44 +1,37 @@
 import { useState } from 'react';
-import { User, UserRole } from '@emekteb/shared-types';
-import { formatDate } from '@emekteb/shared-utils';
-import './App.css';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Sidebar from './components/Sidebar';
+import DashboardPage from './pages/DashboardPage';
+import ImportPage from './pages/ImportPage';
 
 function App() {
-  const [count, setCount] = useState(0);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  const exampleUser: User = {
-    id: '1',
-    email: 'test@example.com',
-    name: 'Test User',
-    role: UserRole.STUDENT,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+  const toggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen);
   };
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>E-Mekteb</h1>
-        <p>Welcome to E-Mekteb application</p>
+    <Router>
+      <div className="flex h-screen bg-gray-50">
+        <Sidebar isOpen={isSidebarOpen} onToggle={toggleSidebar} />
         
-        <div className="card">
-          <button onClick={() => setCount((count) => count + 1)}>
-            count is {count}
-          </button>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test HMR
-          </p>
+        {/* Main Content */}
+        <div
+          className={`flex-1 transition-all duration-300 ease-in-out ${
+            isSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'
+          }`}
+          style={{ willChange: 'margin-left' }}
+        >
+          <main className="h-full overflow-y-auto">
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/import" element={<ImportPage />} />
+            </Routes>
+          </main>
         </div>
-
-        <div className="example">
-          <h2>Shared Types Example</h2>
-          <p>User: {exampleUser.name}</p>
-          <p>Email: {exampleUser.email}</p>
-          <p>Role: {exampleUser.role}</p>
-          <p>Created: {formatDate(exampleUser.createdAt)}</p>
-        </div>
-      </header>
-    </div>
+      </div>
+    </Router>
   );
 }
 

@@ -1,4 +1,7 @@
-FROM node:20-alpine
+FROM node:20-slim
+
+# Install OpenSSL for Prisma
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -25,4 +28,3 @@ EXPOSE 3000
 
 # Start with hot reload (will be overridden by docker-compose)
 CMD ["sh", "-c", "cd /app/apps/api && npx nest start --watch"]
-
