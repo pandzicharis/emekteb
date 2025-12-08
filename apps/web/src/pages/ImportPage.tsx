@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import axios from 'axios';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
 interface ImportResult {
   success: boolean;
   data: {
@@ -45,7 +47,7 @@ export default function ImportPage() {
       formData.append('file', file);
 
       const response = await axios.post<ImportResult>(
-        'http://localhost:3000/import/csv',
+        `${API_URL}/import/csv`,
         formData,
         {
           headers: {

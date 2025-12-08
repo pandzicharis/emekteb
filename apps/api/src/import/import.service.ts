@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { parse } from 'csv-parse/sync';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as bcrypt from 'bcryptjs';
 import { Spol, StatusUcenika, TipRoditelja, TipKontakta, StatusImporta } from '@prisma/client';
 
 interface CsvRow {
@@ -310,11 +311,14 @@ export class ImportService {
           korisnikId = existingUcenik.korisnikId;
         } else {
           // Kreiraj novog korisnika
+          // Generiši default lozinku (korisnik će je morati promijeniti pri prvoj prijavi)
+          const defaultPassword = await bcrypt.hash('password123', 10);
           const korisnik = await this.prisma.korisnik.create({
             data: {
               ime: ime || undefined,
               prezime: prezime || undefined,
               email: email || undefined,
+              lozinka: defaultPassword,
               uloga: 'UCENIK',
               aktivan: true,
             },

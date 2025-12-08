@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "Uloga" AS ENUM ('UCENIK', 'MUALLIM');
+CREATE TYPE "Uloga" AS ENUM ('UCENIK', 'MUALLIM', 'ADMIN');
 
 -- CreateEnum
 CREATE TYPE "Spol" AS ENUM ('MUSKO', 'ZENSKO');
@@ -13,10 +13,14 @@ CREATE TYPE "TipRoditelja" AS ENUM ('MAJKA', 'OTAC');
 -- CreateEnum
 CREATE TYPE "TipKontakta" AS ENUM ('TELEFON', 'MOBITEL', 'EMAIL');
 
+-- CreateEnum
+CREATE TYPE "StatusImporta" AS ENUM ('U_TOKU', 'USPJESAN', 'NEUSPJESAN', 'DJELOMICNO_USPJESAN');
+
 -- CreateTable
 CREATE TABLE "korisnici" (
     "id" TEXT NOT NULL,
     "email" TEXT,
+    "lozinka" TEXT NOT NULL,
     "ime" TEXT,
     "prezime" TEXT,
     "uloga" "Uloga" NOT NULL DEFAULT 'UCENIK',
@@ -32,13 +36,14 @@ CREATE TABLE "ucenici" (
     "id" TEXT NOT NULL,
     "korisnikId" TEXT,
     "eksterniId" INTEGER,
-    "datumRodjenja" TIMESTAMP(3) NOT NULL,
-    "spol" "Spol" NOT NULL,
+    "datumRodjenja" TIMESTAMP(3),
+    "spol" "Spol",
     "mjestoRodjenja" TEXT,
     "adresaStanovanja" TEXT,
-    "status" "StatusUcenika" NOT NULL DEFAULT 'AKTIVAN',
+    "status" "StatusUcenika",
     "eksterniDatumKreiran" TIMESTAMP(3),
     "eksterniDatumAzuriran" TIMESTAMP(3),
+    "greske" JSONB,
     "imaRoditelje" TEXT,
     "roditeljiZajedno" TEXT,
     "roditeljiRazdvojeni" TEXT,
@@ -103,6 +108,23 @@ CREATE TABLE "kontakti" (
     "azuriran" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "kontakti_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "imports" (
+    "id" TEXT NOT NULL,
+    "nazivFajla" TEXT NOT NULL,
+    "status" "StatusImporta" NOT NULL DEFAULT 'U_TOKU',
+    "ukupnoRedova" INTEGER NOT NULL DEFAULT 0,
+    "uspjesnoSacuvano" INTEGER NOT NULL DEFAULT 0,
+    "novih" INTEGER NOT NULL DEFAULT 0,
+    "updateanih" INTEGER NOT NULL DEFAULT 0,
+    "gresaka" INTEGER NOT NULL DEFAULT 0,
+    "logovi" JSONB,
+    "kreiran" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "azuriran" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "imports_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex

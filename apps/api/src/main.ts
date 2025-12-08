@@ -1,6 +1,11 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
+// Set default DATABASE_URL if not provided
+if (!process.env['DATABASE_URL']) {
+  process.env['DATABASE_URL'] = 'postgresql://postgres:postgres@localhost:5439/emekteb?schema=public';
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   

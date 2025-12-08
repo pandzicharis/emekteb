@@ -8,7 +8,7 @@ generator client {
 
 datasource db {
     provider = "postgresql"
-    url      = "postgresql://postgres:postgres@postgres:5432/emekteb?schema=public"
+    url      = env("DATABASE_URL")
 }
 
 // ============================================
@@ -18,6 +18,7 @@ datasource db {
 model Korisnik {
     id       String   @id @default(uuid())
     email    String?  @unique
+    lozinka  String // Hashed password
     ime      String?
     prezime  String?
     uloga    Uloga    @default(UCENIK)
@@ -34,6 +35,7 @@ model Korisnik {
 enum Uloga {
     UCENIK
     MUALLIM
+    ADMIN
 }
 
 // ============================================

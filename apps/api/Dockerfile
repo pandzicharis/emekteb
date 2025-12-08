@@ -14,14 +14,12 @@ COPY packages/shared-utils/package.json ./packages/shared-utils/
 # Install dependencies
 RUN npm ci
 
-# Copy Prisma schema
-COPY apps/api/prisma ./apps/api/prisma
-
-# Generate Prisma Client
-RUN cd apps/api && npx prisma generate
-
 # Copy source code
 COPY . .
+
+# Generate Prisma Client (after copying all files to ensure latest schema)
+# This ensures Prisma client is generated with the latest schema
+RUN cd apps/api && npx prisma generate
 
 # Expose port
 EXPOSE 3000

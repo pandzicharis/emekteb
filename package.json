@@ -18,6 +18,10 @@
     "npm": ">=10.0.0"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "csv-parse": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6"
   }
 }
