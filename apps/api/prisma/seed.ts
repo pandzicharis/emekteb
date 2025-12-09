@@ -1,4 +1,4 @@
-import { PrismaClient, Uloga } from '@prisma/client';
+import { Ilmihal, PrismaClient, Uloga } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -55,6 +55,35 @@ async function main() {
   });
 
   console.log('✅ Muallim 2 kreiran:', muallim2.email);
+
+  // Kreiraj ili osvježi razrede 1-9
+  const razredi = Array.from({ length: 9 }, (_, index) => {
+    const broj = index + 1;
+    let ilmihal: Ilmihal;
+
+    if (broj <= 3) {
+      ilmihal = Ilmihal.ILMIHAL_I;
+    } else if (broj <= 6) {
+      ilmihal = Ilmihal.ILMIHAL_II;
+    } else {
+      ilmihal = Ilmihal.ILMIHAL_III;
+    }
+
+    return {
+      name: `Razred ${broj}`,
+      ilmihal,
+    };
+  });
+
+  for (const razred of razredi) {
+    await prisma.razred.upsert({
+      where: { name: razred.name },
+      update: { ilmihal: razred.ilmihal, status: true },
+      create: { name: razred.name, ilmihal: razred.ilmihal, status: true },
+    });
+  }
+
+  console.log('✅ Razredi 1-9 su postavljeni sa odgovarajućim ilmihalom');
 
   console.log('🎉 Seeding completed!');
   console.log('\n📝 Login credentials:');

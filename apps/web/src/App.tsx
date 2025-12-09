@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import ImportPage from './pages/ImportPage';
 import SetupNastavnaGodinaPage from './pages/SetupNastavnaGodinaPage';
+import NastavniPlanPage from './pages/NastavniPlanPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function AppContent() {
@@ -52,6 +53,7 @@ function AppContent() {
               <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
               <Route path="/import" element={<ProtectedRoute allowedRoles={['ADMIN']}><ImportPage /></ProtectedRoute>} />
               <Route path="/setup-nastavna-godina" element={<ProtectedRoute><SetupNastavnaGodinaPage /></ProtectedRoute>} />
+              <Route path="/nastavni-plan" element={<ProtectedRoute><NastavniPlanPage /></ProtectedRoute>} />
               <Route path="/login" element={<Navigate to="/" replace />} />
             </Routes>
           </main>

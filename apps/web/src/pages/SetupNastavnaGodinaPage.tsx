@@ -90,6 +90,11 @@ type StepData = {
       muallimId: string | null;
       ucenici: string[]; // ako split nije uključen
       split: SplitState;
+      settings?: {
+        single?: { kuran: boolean; sufara: boolean };
+        groupA?: { kuran: boolean; sufara: boolean };
+        groupB?: { kuran: boolean; sufara: boolean };
+      };
       raspored: {
         single: Schedule;
         groupA?: Schedule;
@@ -104,6 +109,7 @@ export default function SetupNastavnaGodinaPage() {
   const [step, setStep] = useState(1);
   const [expandedRazred, setExpandedRazred] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  const [occupiedFilter, setOccupiedFilter] = useState('');
   const [dragging, setDragging] = useState<{ razred: number; ucenikId: string } | null>(null);
   const [hoverDrop, setHoverDrop] = useState<{ razred: number; group: 'A' | 'B' } | null>(null);
   const [razredActiveStep, setRazredActiveStep] = useState<Record<number, number>>({});
@@ -224,6 +230,7 @@ export default function SetupNastavnaGodinaPage() {
     muallimId: null as string | null,
     ucenici: [] as string[],
     split: { enabled: false, groupA: [] as string[], groupB: [] as string[], selectionDone: false },
+  settings: { single: { kuran: false, sufara: false } },
     raspored: {
       single: { day: 'subota' as const, slot: '', location: 'ucionica' as const },
     },
@@ -299,12 +306,23 @@ export default function SetupNastavnaGodinaPage() {
         rasporedObj.grupaB = entry?.raspored?.groupB ?? null;
       }
 
+      const defaultSet = { kuran: false, sufara: false };
+      const settingsObj: { grupaA: { kuran: boolean; sufara: boolean }; grupaB?: { kuran: boolean; sufara: boolean } } = {
+        grupaA: entry?.split?.enabled
+          ? (entry?.settings?.groupA ?? entry?.settings?.single ?? defaultSet)
+          : (entry?.settings?.single ?? entry?.settings?.groupA ?? defaultSet),
+      };
+      if (entry?.split?.enabled) {
+        settingsObj.grupaB = entry?.settings?.groupB ?? defaultSet;
+      }
+
       return {
         razred: r,
         muallimId: entry?.muallimId ?? null,
         split: entry?.split?.enabled ?? false,
         ucenici: uceniciObj,
         raspored: rasporedObj,
+        postavkeGrupe: settingsObj,
       };
     });
 
@@ -321,6 +339,55 @@ export default function SetupNastavnaGodinaPage() {
       },
       razredi: koraci,
     };
+  }, [data]);
+
+  type OccupiedSlotInfo = {
+    razred: number;
+    grupa: string;
+    slot: string;
+    end: string;
+    day: Schedule['day'];
+    location: Schedule['location'];
+  };
+
+  const occupiedSlots = useMemo(() => {
+    const empty: Record<Schedule['day'], Record<Schedule['location'], OccupiedSlotInfo[]>> = {
+      subota: { ucionica: [], divanhana: [] },
+      nedjelja: { ucionica: [], divanhana: [] },
+    };
+
+    const pushSlot = (razred: number, grupa: string, schedule?: Schedule) => {
+      if (!schedule?.slot) return;
+      empty[schedule.day][schedule.location].push({
+        razred,
+        grupa,
+        slot: schedule.slot,
+        end: getEndTime(schedule.slot),
+        day: schedule.day,
+        location: schedule.location,
+      });
+    };
+
+    for (const razred of data.korak2.razredi) {
+      const entry = data.korak3[razred];
+      if (!entry) continue;
+
+      if (entry.split.enabled) {
+        pushSlot(razred, 'Grupa 1', entry.raspored.groupA);
+        pushSlot(razred, 'Grupa 2', entry.raspored.groupB);
+      } else {
+        pushSlot(razred, 'Jedna grupa', entry.raspored.single);
+      }
+    }
+
+    // Sort po vremenu radi konzistentnog prikaza
+    (['subota', 'nedjelja'] as const).forEach((day) => {
+      (['ucionica', 'divanhana'] as const).forEach((loc) => {
+        empty[day][loc].sort((a, b) => a.slot.localeCompare(b.slot));
+      });
+    });
+
+    return empty;
   }, [data]);
 
   const toggleRazred = (r: number) => {
@@ -437,28 +504,51 @@ export default function SetupNastavnaGodinaPage() {
       if (enabled) {
         // Kada enable: zadrži postojeće u groupA, groupB ostaje prazna
         // (već su svi u groupA)
+        const baseSingle = current.settings?.single ?? current.settings?.groupA ?? { kuran: false, sufara: false };
+        return {
+          ...prev,
+          korak3: {
+            ...prev.korak3,
+            [razred]: {
+              ...current,
+              split: {
+                enabled,
+                groupA,
+                groupB,
+                selectionDone: current.split.selectionDone ?? false,
+              },
+              settings: {
+                groupA: current.settings?.groupA ?? baseSingle,
+                groupB: current.settings?.groupB ?? { kuran: false, sufara: false },
+              },
+              ucenici: [],
+            },
+          },
+        };
       } else {
         // Kada disable: spoji groupA+B nazad u groupA
         groupA = [...groupA, ...groupB];
         groupB = [];
-      }
+        const mergedSettings = current.settings?.groupA ?? current.settings?.single ?? { kuran: false, sufara: false };
 
-      return {
-        ...prev,
-        korak3: {
-          ...prev.korak3,
-          [razred]: {
-            ...current,
-            split: {
-              enabled,
-              groupA,
-              groupB,
-              selectionDone: current.split.selectionDone ?? false,
+        return {
+          ...prev,
+          korak3: {
+            ...prev.korak3,
+            [razred]: {
+              ...current,
+              split: {
+                enabled,
+                groupA,
+                groupB,
+                selectionDone: current.split.selectionDone ?? false,
+              },
+              settings: { single: mergedSettings },
+              ucenici: [], // Više se ne koristi, zadržan za kompatibilnost
             },
-            ucenici: [], // Više se ne koristi, zadržan za kompatibilnost
           },
-        },
-      };
+        };
+      }
     });
   };
 
@@ -492,6 +582,46 @@ export default function SetupNastavnaGodinaPage() {
     });
   };
 
+  const setGroupSetting = (razred: number, target: 'single' | 'groupA' | 'groupB', field: 'kuran' | 'sufara') => {
+    setData((prev) => {
+      const current = prev.korak3[razred] ?? defaultRazredState();
+      const settings = current.settings ? { ...current.settings } : {};
+      const base = { kuran: false, sufara: false };
+
+      const next =
+        target === 'single'
+          ? { ...(settings.single ?? settings.groupA ?? base), [field]: !(settings.single ?? settings.groupA ?? base)[field] }
+          : {
+              ...(target === 'groupA' ? settings.groupA ?? settings.single ?? base : settings.groupB ?? base),
+              [field]: !(
+                target === 'groupA'
+                  ? (settings.groupA ?? settings.single ?? base)[field]
+                  : (settings.groupB ?? base)[field]
+              ),
+            };
+
+      const updatedSettings =
+        target === 'single'
+          ? { single: next }
+          : {
+              ...settings,
+              groupA: target === 'groupA' ? next : settings.groupA ?? settings.single ?? base,
+              groupB: target === 'groupB' ? next : settings.groupB ?? base,
+            };
+
+      return {
+        ...prev,
+        korak3: {
+          ...prev.korak3,
+          [razred]: {
+            ...current,
+            settings: updatedSettings,
+          },
+        },
+      };
+    });
+  };
+
   const toggleStudent = (razred: number, ucenikId: string) => {
     // Koristimo groupA umjesto ucenici
     const entry = data.korak3[razred];
@@ -505,7 +635,7 @@ export default function SetupNastavnaGodinaPage() {
     const steps = [
       { id: 1, label: 'Osnovni podaci' },
       { id: 2, label: 'Razredi' },
-      { id: 3, label: 'Dodjela učenika' },
+      { id: 3, label: 'Postavke grupa' },
     ];
     return (
       <div className="flex items-center gap-4 mb-8">
@@ -628,6 +758,35 @@ export default function SetupNastavnaGodinaPage() {
             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50"
           />
         </div>
+      </div>
+
+      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold text-gray-700 mb-1">Status</div>
+          <p className="text-xs text-gray-600">Aktivan nastavni plan će biti dostupan za odabir</p>
+        </div>
+        <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 ml-4">
+          <input
+            type="checkbox"
+            checked={data.korak1.status === 'ACTIVE'}
+            onChange={(e) =>
+              setData((prev) => ({
+                ...prev,
+                korak1: { ...prev.korak1, status: e.target.checked ? 'ACTIVE' : 'INACTIVE' },
+              }))
+            }
+            className="sr-only peer"
+          />
+          <div className={`relative w-11 h-6 rounded-full transition-colors ${
+            data.korak1.status === 'ACTIVE'
+              ? 'bg-green-600'
+              : 'bg-gray-300'
+          }`}>
+            <div className={`absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-transform ${
+              data.korak1.status === 'ACTIVE' ? 'translate-x-5' : 'translate-x-0'
+            }`}></div>
+          </div>
+        </label>
       </div>
 
     </div>
@@ -834,27 +993,62 @@ const renderSplitControls = (razred: number, isReadOnly: boolean = false) => {
 
   return (
     <div className="space-y-3">
-      {selectionDone && !splitState.enabled && (
-        <div className="px-4 py-3 rounded-lg bg-gray-50 border border-gray-200">
-          <p className="text-sm text-gray-700">
-            Svi učenici (<span className="font-bold">{selectedCount}</span>) će biti raspoređeni u jednoj grupi
-          </p>
+      {selectionDone && !isReadOnly && (
+        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-bold text-gray-700 mb-1">Podjela u grupe</div>
+            <p className="text-xs text-gray-600">
+              {splitState.enabled 
+                ? `Učenici će biti podijeljeni u dvije grupe (Grupa 1: ${groupACount}, Grupa 2: ${groupBCount})`
+                : `Svi učenici (${selectedCount}) će biti raspoređeni u jednoj grupi`}
+            </p>
+          </div>
+          <label className={`relative inline-flex items-center flex-shrink-0 ml-4 ${!selectionDone ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+            <input
+              type="checkbox"
+              checked={splitState.enabled}
+              onChange={() => setSplit(razred, !splitState.enabled)}
+              disabled={!selectionDone}
+              className="sr-only peer"
+            />
+            <div className={`relative w-11 h-6 rounded-full transition-colors ${
+              splitState.enabled
+                ? 'bg-green-600'
+                : 'bg-gray-300'
+            } ${!selectionDone ? 'opacity-50' : ''}`}>
+              <div className={`absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-transform ${
+                splitState.enabled ? 'translate-x-5' : 'translate-x-0'
+              }`}></div>
+            </div>
+          </label>
         </div>
       )}
 
-      {selectionDone && splitState.enabled && isReadOnly && (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-green-50 border border-green-200">
-          <svg className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-          </svg>
-          <div className="flex flex-col gap-1">
-            <p className="text-sm text-green-900">
-              <span className="font-bold">GRUPA 1:</span> <span className="font-bold">{groupACount}</span> djece
-            </p>
-            <p className="text-sm text-green-900">
-              <span className="font-bold">GRUPA 2:</span> <span className="font-bold">{groupBCount}</span> djece
-            </p>
-          </div>
+      {selectionDone && isReadOnly && (
+        <div className="px-4 py-3 rounded-lg bg-green-50 border border-green-200 space-y-1">
+          {splitState.enabled ? (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-green-900">GRUPA 1</span>
+                <span className="text-sm text-green-900">
+                  <span className="font-bold">{groupACount}</span> djece
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-green-900">GRUPA 2</span>
+                <span className="text-sm text-green-900">
+                  <span className="font-bold">{groupBCount}</span> djece
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-green-900">GRUPA</span>
+              <span className="text-sm text-green-900">
+                <span className="font-bold">{groupACount}</span> djece
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -932,6 +1126,152 @@ const renderSplitControls = (razred: number, isReadOnly: boolean = false) => {
   );
 };
 
+  const renderOccupiedSlotsPanel = (highlightRazred?: number) => {
+    const dayLabels: Record<Schedule['day'], string> = { subota: 'Subota', nedjelja: 'Nedjelja' };
+    const locationLabels: Record<Schedule['location'], string> = { ucionica: 'Učionica', divanhana: 'Divanhana' };
+    const filter = occupiedFilter.trim().toLowerCase();
+
+    const matchesMuallim = (slot: OccupiedSlotInfo) => {
+      if (!filter) return true;
+      // Kada filter dolazi iz switcha, matchamo po ID; ako ikad bude custom teksta, fallback na ime/prezime
+      const muallimId = data.korak3[slot.razred]?.muallimId;
+      const muallim = muallimId ? MOCK_MUALLIMI.find((m) => m.id === muallimId) : undefined;
+      if (!muallim) return false;
+      if (MOCK_MUALLIMI.some((m) => m.id === occupiedFilter)) {
+        return muallim.id === occupiedFilter;
+      }
+      const full = `${muallim.ime} ${muallim.prezime}`.toLowerCase();
+      return full.includes(filter);
+    };
+
+    const renderSlotRow = (slot: OccupiedSlotInfo) => {
+      const active = highlightRazred === slot.razred;
+      const muallimId = data.korak3[slot.razred]?.muallimId;
+      const muallim = muallimId ? MOCK_MUALLIMI.find((m) => m.id === muallimId) : undefined;
+      const entrySettings = data.korak3[slot.razred]?.settings;
+      const formatProgram = (s?: { kuran?: boolean; sufara?: boolean }) => {
+        if (!s) return '';
+        const parts: string[] = [];
+        if (s.kuran) parts.push('Kuran');
+        if (s.sufara) parts.push('Sufara');
+        return parts.join(' • ');
+      };
+      const programLabel = (() => {
+        if (!entrySettings) return '';
+        if (slot.grupa === 'Jedna grupa') {
+          return formatProgram(entrySettings.single ?? entrySettings.groupA);
+        }
+        if (slot.grupa === 'Grupa 1') {
+          return formatProgram(entrySettings.groupA ?? entrySettings.single);
+        }
+        if (slot.grupa === 'Grupa 2') {
+          return formatProgram(entrySettings.groupB);
+        }
+        return '';
+      })();
+      const groupLabel = slot.grupa === 'Jedna grupa' ? '' : ` • ${slot.grupa}`;
+      return (
+        <div
+          key={`${slot.day}-${slot.location}-${slot.slot}-${slot.razred}-${slot.grupa}`}
+          className={`flex items-start justify-between gap-2 px-2 py-2 rounded-md border ${
+            active ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white'
+          }`}
+        >
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-gray-900">
+              {slot.slot} - {slot.end}
+            </p>
+            <p className="text-[11px] text-gray-600 font-semibold truncate">
+              {labelGrupa(slot.razred)}
+              {groupLabel}
+              {programLabel ? ` • ${programLabel}` : ''}
+              {muallim ? ` • ${muallim.ime} ${muallim.prezime}` : ''}
+            </p>
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <div className="border border-gray-200 rounded-lg bg-white shadow-sm p-4 lg:sticky lg:top-4">
+        <div className="flex flex-col gap-2 mb-3">
+          <div>
+            <h4 className="text-sm font-semibold text-gray-900">Zauzeti slotovi</h4>
+            <p className="text-xs text-gray-500 font-medium">Trenutni raspored</p>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold text-gray-600 uppercase tracking-wide">Muallimi</span>
+            {occupiedFilter && (
+              <button
+                onClick={() => setOccupiedFilter('')}
+                className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 transition"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {[{ id: '', label: 'Svi' }, ...MOCK_MUALLIMI.map((m) => ({ id: m.id, label: `${m.ime} ${m.prezime}`, initials: `${m.ime[0] ?? ''}${m.prezime[0] ?? ''}`.toUpperCase() })) as { id: string; label: string; initials?: string }[]].flat().map((m) => {
+              const active = occupiedFilter === m.id;
+              const hasAvatar = !!m.id;
+              const initials = hasAvatar ? m.initials ?? '' : '';
+              return (
+                <button
+                  key={m.id || 'all'}
+                  onClick={() => setOccupiedFilter(active ? '' : m.id)}
+                  className={`inline-flex items-center gap-2 px-2.5 py-1.5 rounded-full border text-[11px] font-semibold transition ${
+                    active
+                      ? 'bg-blue-600 text-white border-blue-600 shadow'
+                      : 'bg-white text-gray-800 border-gray-200 hover:border-blue-300 hover:text-blue-700'
+                  }`}
+                >
+                  {hasAvatar && (
+                    <span
+                      className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold ${
+                        active ? 'bg-white text-blue-700' : 'bg-gray-100 text-gray-700'
+                      }`}
+                    >
+                      {initials}
+                    </span>
+                  )}
+                  <span className="whitespace-nowrap">{m.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="space-y-3">
+          {(['subota', 'nedjelja'] as const).map((day) => (
+            <div key={day} className="rounded-lg border border-gray-100 bg-gray-50 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold text-gray-900">{dayLabels[day]}</span>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                {(['ucionica', 'divanhana'] as const).map((loc) => {
+                  const list = occupiedSlots[day][loc].filter(matchesMuallim);
+                  return (
+                    <div key={loc} className="bg-white border border-gray-200 rounded-md p-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-gray-800">{locationLabels[loc]}</span>
+                      </div>
+                      <div className="space-y-1">
+                        {list.length === 0 ? (
+                          <div className="text-[11px] text-gray-400 font-medium italic">Nema zauzetih slotova</div>
+                        ) : (
+                          list.map(renderSlotRow)
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
 const renderScheduleBoard = (
   razred: number,
   target: 'single' | 'groupA' | 'groupB',
@@ -952,48 +1292,50 @@ const renderScheduleBoard = (
     setSchedule(razred, target, { [field]: value } as Partial<Schedule>);
   };
 
-  // Provjeri zauzetost slotova - provjerava sve razrede i grupe, ali samo za istu lokaciju
-  const checkSlotTaken = (day: Schedule['day'], slot: string, location: Schedule['location']) => {
-    // Provjeri sve razrede
+  // Vraća sve već zauzete grupe u istom terminu/lokaciji (dozvoljavamo overlap)
+  const findSlotConflicts = (day: Schedule['day'], slot: string, location: Schedule['location']) => {
+    const conflicts: { razred: number; grupa: 'single' | 'groupA' | 'groupB' }[] = [];
     for (const r of data.korak2.razredi) {
       const otherEntry = data.korak3[r];
       if (!otherEntry) continue;
 
-      // Provjeri single grupu
-      if (otherEntry.raspored.single?.day === day && 
-          otherEntry.raspored.single?.slot === slot && 
-          otherEntry.raspored.single?.location === location) {
-        // Ako je isti razred i target je single, preskoči (to je trenutni)
-        if (r === razred && target === 'single') continue;
-        // Ako je split uključen, single se ne koristi
-        if (otherEntry.split.enabled) continue;
-        return { taken: true, razred: r, grupa: 'single' };
+      // Single
+      if (
+        otherEntry.raspored.single?.day === day &&
+        otherEntry.raspored.single?.slot === slot &&
+        otherEntry.raspored.single?.location === location &&
+        !(r === razred && target === 'single') &&
+        !otherEntry.split.enabled
+      ) {
+        conflicts.push({ razred: r, grupa: 'single' });
       }
 
-      // Provjeri groupA
-      if (otherEntry.raspored.groupA?.day === day && 
-          otherEntry.raspored.groupA?.slot === slot && 
-          otherEntry.raspored.groupA?.location === location) {
-        // Ako je isti razred i target je groupA, preskoči
-        if (r === razred && target === 'groupA') continue;
-        return { taken: true, razred: r, grupa: 'groupA' };
+      // Grupa A
+      if (
+        otherEntry.raspored.groupA?.day === day &&
+        otherEntry.raspored.groupA?.slot === slot &&
+        otherEntry.raspored.groupA?.location === location &&
+        !(r === razred && target === 'groupA')
+      ) {
+        conflicts.push({ razred: r, grupa: 'groupA' });
       }
 
-      // Provjeri groupB
-      if (otherEntry.raspored.groupB?.day === day && 
-          otherEntry.raspored.groupB?.slot === slot && 
-          otherEntry.raspored.groupB?.location === location) {
-        // Ako je isti razred i target je groupB, preskoči
-        if (r === razred && target === 'groupB') continue;
-        return { taken: true, razred: r, grupa: 'groupB' };
+      // Grupa B
+      if (
+        otherEntry.raspored.groupB?.day === day &&
+        otherEntry.raspored.groupB?.slot === slot &&
+        otherEntry.raspored.groupB?.location === location &&
+        !(r === razred && target === 'groupB')
+      ) {
+        conflicts.push({ razred: r, grupa: 'groupB' });
       }
     }
-    return { taken: false, razred: null, grupa: null };
+    return conflicts;
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+    <div className="rounded-xl border border-gray-200 bg-white shadow-md" style={{ minHeight: 420 }}>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <span className="text-sm font-semibold text-gray-900">{label}</span>
         <span className="text-xs text-gray-500 font-medium">
           {schedule.day === 'subota' ? 'Subota' : 'Nedjelja'} • {schedule.slot ? `${schedule.slot} - ${getEndTime(schedule.slot)}` : 'Nije odabrano'} •{' '}
@@ -1001,8 +1343,8 @@ const renderScheduleBoard = (
         </span>
       </div>
 
-      <div className="p-3 space-y-4">
-        <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-3 py-2">
+      <div className="p-5 space-y-5">
+        <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-4 py-3">
           <span className="text-xs font-semibold text-gray-600">Lokacija</span>
           <div className="inline-flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-full p-1">
             {(['ucionica', 'divanhana'] as const).map((loc) => {
@@ -1025,7 +1367,7 @@ const renderScheduleBoard = (
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {WEEKEND_DAYS.map((day) => {
             const dayActive = schedule.day === day;
             return (
@@ -1053,32 +1395,82 @@ const renderScheduleBoard = (
 
                 <div className="grid grid-cols-2 gap-2">
                   {SLOT_TIMES.map((t) => {
-                    const slotCheck = checkSlotTaken(day, t, schedule.location);
-                    const isTaken = slotCheck.taken;
+                    const conflicts = findSlotConflicts(day, t, schedule.location);
                     const active = dayActive && schedule.slot === t;
-                    const disabled = !dayActive ? false : isTaken && target !== 'single';
+                    const showConflict = conflicts.length > 0;
+                    const conflictLabels = conflicts.map((c) => {
+                      if (c.grupa === 'groupA') return `${labelGrupa(c.razred)} • Grupa 1`;
+                      if (c.grupa === 'groupB') return `${labelGrupa(c.razred)} • Grupa 2`;
+                      return labelGrupa(c.razred); // single grupa: samo razred
+                    });
+                    const activeConflict = showConflict && active;
+                    const passiveConflict = showConflict && !active;
                     return (
                       <button
                         key={`${day}-${t}`}
                         onClick={() => {
                           setField('day', day);
-                          if (!isTaken) setField('slot', t);
+                          setField('slot', t);
                         }}
-                        disabled={disabled || ready === false || isReadOnly}
-                        className={`text-left px-2 py-3 rounded-lg border text-xs font-semibold transition h-16 flex flex-col justify-start ${
-                          active
-                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                            : isTaken
-                            ? 'bg-red-50 text-red-700 border-red-300'
-                            : 'bg-white text-gray-700 border-gray-200 hover:border-emerald-300'
+                        disabled={!dayActive || ready === false || isReadOnly}
+                        className={`relative text-left rounded-lg border text-[11px] font-semibold transition flex flex-row items-stretch gap-0 ${
+                          activeConflict
+                            ? 'bg-orange-50 text-orange-900 border-orange-300 shadow-[0_1px_4px_rgba(249,115,22,0.35)]'
+                            : passiveConflict
+                            ? 'bg-purple-50 text-purple-900 border-purple-300 shadow-[0_1px_4px_rgba(168,85,247,0.35)]'
+                            : active
+                            ? 'bg-emerald-50 text-emerald-900 border-emerald-300 shadow-sm'
+                            : 'bg-white text-gray-700 border-gray-200 hover:border-emerald-200'
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                       >
-                        <div className="flex flex-col">
-                          <span>{t} - {getEndTime(t)}</span>
-                          {isTaken && slotCheck.razred !== null && (
-                            <span className="text-[10px] text-red-600 font-semibold mt-1">
-                              {labelGrupa(slotCheck.razred)} • {slotCheck.grupa === 'groupA' ? 'Grupa 1' : slotCheck.grupa === 'groupB' ? 'Grupa 2' : 'Jedna grupa'}
-                            </span>
+                        <div
+                          className={`w-2 rounded-l-lg ${
+                            activeConflict
+                              ? 'bg-orange-500'
+                              : passiveConflict
+                              ? 'bg-purple-500'
+                              : active
+                              ? 'bg-emerald-500'
+                              : 'bg-emerald-200'
+                          }`}
+                        />
+                        <div className="flex-1 px-3 py-3 flex flex-col gap-1 overflow-hidden">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold">{t} - {getEndTime(t)}</span>
+                            {showConflict && (
+                              <span
+                                className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${
+                                  activeConflict
+                                    ? 'bg-orange-100 border-orange-300 text-orange-700'
+                                    : 'bg-purple-100 border-purple-300 text-purple-700'
+                                }`}
+                                title={conflictLabels.join('\n')}
+                              >
+                                {activeConflict ? (
+                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M11 2l-7 9h5v7l7-9h-5V2z" />
+                                  </svg>
+                                ) : (
+                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M10 2a1 1 0 01.894.553l6 12A1 1 0 0116 16H4a1 1 0 01-.894-1.447l6-12A1 1 0 0110 2zm0 5.5a1 1 0 00-.993.883L9 8.5v2a1 1 0 001.993.117L11 10.5v-2a1 1 0 00-1-1zm0 6a1.25 1.25 0 100-2.5 1.25 1.25 0 000 2.5z" />
+                                  </svg>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                          {showConflict && (
+                            <div
+                              className={`text-[10px] font-semibold leading-tight ${
+                                activeConflict ? 'text-orange-800' : 'text-purple-800'
+                              }`}
+                              title={conflictLabels.join(', ')}
+                            >
+                              {conflictLabels.map((label) => (
+                                <div key={label} className="truncate">
+                                  {label}
+                                </div>
+                              ))}
+                            </div>
                           )}
                         </div>
                       </button>
@@ -1205,103 +1597,133 @@ const renderScheduleBoard = (
   };
 
   const renderStep3 = () => (
-    <div className="space-y-4">
-      {data.korak2.razredi.length === 0 && (
-        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-900 font-medium">
-          Prvo odaberite razrede u prethodnom koraku.
-        </div>
-      )}
-      {data.korak2.razredi.map((r) => {
-        const allStepsSaved = areAllStepsSaved(r);
-        return (
-        <div key={r} className={`border ${allStepsSaved ? 'border-green-500' : 'border-gray-200'} rounded-lg bg-white transition-colors`}>
-          <button
-              onClick={() => {
-                const next = expandedRazred === r ? null : r;
-                setExpandedRazred(next);
-                if (next !== null && razredActiveStep[r] === undefined) {
-                  setActiveRazredStep(r, 1);
-                }
-              }}
-            className="w-full flex items-center justify-between px-4 py-3"
-          >
-            <div className="flex items-center gap-3">
-              {allStepsSaved && (
-                <svg className="w-5 h-5 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-              )}
-              <span className="text-base font-semibold text-gray-900">{labelGrupa(r)}</span>
-              {(() => {
-                const info = razredInfo(r);
-                return (
-                  <span className={`text-xs px-2 py-1 rounded border font-semibold ${info.color}`}>
-                    {info.label}
-                  </span>
-                );
-              })()}
-            </div>
-            <svg
-              className={`w-5 h-5 text-gray-500 transition-transform ${
-                expandedRazred === r ? 'rotate-180' : ''
-              }`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+    <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4">
+      <div className="space-y-4">
+        {data.korak2.razredi.length === 0 && (
+          <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-900 font-medium">
+            Prvo odaberite razrede u prethodnom koraku.
+          </div>
+        )}
+        {data.korak2.razredi.map((r) => {
+          const allStepsSaved = areAllStepsSaved(r);
+          return (
+          <div key={r} className={`border ${allStepsSaved ? 'border-green-500' : 'border-gray-200'} rounded-lg bg-white transition-colors`}>
+            <button
+                onClick={() => {
+                  const next = expandedRazred === r ? null : r;
+                  setExpandedRazred(next);
+                  if (next !== null && razredActiveStep[r] === undefined) {
+                    setActiveRazredStep(r, 1);
+                  }
+                }}
+              className="w-full flex items-center justify-between px-4 py-3"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {allStepsSaved && expandedRazred !== r && (
-            <div className="mx-4 mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                {allStepsSaved && (
+                  <svg className="w-5 h-5 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                )}
+                <span className="text-base font-semibold text-gray-900">{labelGrupa(r)}</span>
                 {(() => {
-                  const entry = data.korak3[r];
-                  const selectedMuallim = MOCK_MUALLIMI.find(m => m.id === entry?.muallimId);
-                  const splitOn = entry?.split?.enabled;
-                  
+                  const info = razredInfo(r);
                   return (
-                    <>
-                      <div className="text-sm text-green-900">
-                        <span className="font-bold">Muallim:</span> {selectedMuallim ? `${selectedMuallim.ime} ${selectedMuallim.prezime}` : 'Nije odabran'}
-                      </div>
-                      {splitOn ? (
-                        <>
-                          <div className="text-sm text-green-900">
-                            <span className="font-bold">GRUPA 1:</span> <span className="font-bold">{entry.split.groupA?.length ?? 0}</span> djece • {entry.raspored.groupA ? (
-                              <>{entry.raspored.groupA.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupA.slot ? `${entry.raspored.groupA.slot} - ${getEndTime(entry.raspored.groupA.slot)}` : ''} • {entry.raspored.groupA.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
-                            ) : 'Nije postavljen'}
-                          </div>
-                          <div className="text-sm text-green-900">
-                            <span className="font-bold">GRUPA 2:</span> <span className="font-bold">{entry.split.groupB?.length ?? 0}</span> djece • {entry.raspored.groupB ? (
-                              <>{entry.raspored.groupB.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupB.slot ? `${entry.raspored.groupB.slot} - ${getEndTime(entry.raspored.groupB.slot)}` : ''} • {entry.raspored.groupB.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
-                            ) : 'Nije postavljen'}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="text-sm text-green-900">
-                          <span className="font-bold">{entry?.split?.groupA?.length ?? 0}</span> djece • {entry.raspored.single ? (
-                            <>{entry.raspored.single.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.single.slot ? `${entry.raspored.single.slot} - ${getEndTime(entry.raspored.single.slot)}` : ''} • {entry.raspored.single.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
-                          ) : 'Nije postavljen'}
-                        </div>
-                      )}
-                    </>
+                    <span className={`text-xs px-2 py-1 rounded border font-semibold ${info.color}`}>
+                      {info.label}
+                    </span>
                   );
                 })()}
               </div>
-            </div>
-          )}
-          {expandedRazred === r && (
-            <div className="px-4 pb-4 space-y-6">
-              {/* Sadržaj koraka */}
-              <div className="space-y-4">
-                    {/* Step 1: Muallim */}
-                    {isStepActive(r, 1) ? (
-                      <div
-                        className={`bg-white border rounded-lg p-4 shadow-sm flex flex-col transition-all duration-300 ${
-                          isStepSaved(r, 1) ? 'border-green-200 shadow-green-50' : 'border-gray-200'
-                        }`}
-                      >
+              <svg
+                className={`w-5 h-5 text-gray-500 transition-transform ${
+                  expandedRazred === r ? 'rotate-180' : ''
+                }`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {allStepsSaved && expandedRazred !== r && (
+              <div className="mx-4 mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="space-y-2">
+                  {(() => {
+                    const entry = data.korak3[r];
+                    const selectedMuallim = MOCK_MUALLIMI.find(m => m.id === entry?.muallimId);
+                    const splitOn = entry?.split?.enabled;
+                    const settings = entry?.settings;
+                    const renderBadges = (key: 'single' | 'groupA' | 'groupB') => {
+                      const s =
+                        key === 'single'
+                          ? settings?.single ?? settings?.groupA
+                          : key === 'groupA'
+                          ? settings?.groupA ?? settings?.single
+                          : settings?.groupB;
+                      if (!s || (!s.kuran && !s.sufara)) {
+                        return null;
+                      }
+                      return (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold">
+                          {s.kuran && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              Kuran
+                            </span>
+                          )}
+                          {s.sufara && (
+                            <span className="px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-800 border border-cyan-200">
+                              Sufara
+                            </span>
+                          )}
+                        </span>
+                      );
+                    };
+                    
+                    return (
+                      <>
+                        <div className="text-sm text-green-900">
+                          <span className="font-bold">Muallim:</span> {selectedMuallim ? `${selectedMuallim.ime} ${selectedMuallim.prezime}` : 'Nije odabran'}
+                        </div>
+                        {splitOn ? (
+                          <>
+                            <div className="text-sm text-green-900 flex flex-wrap items-center gap-2">
+                              <span className="font-bold">GRUPA 1:</span> <span className="font-bold">{entry.split.groupA?.length ?? 0}</span> djece • {entry.raspored.groupA ? (
+                                <>{entry.raspored.groupA.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupA.slot ? `${entry.raspored.groupA.slot} - ${getEndTime(entry.raspored.groupA.slot)}` : ''} • {entry.raspored.groupA.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
+                              ) : 'Nije postavljen'}
+                              <div className="inline-flex items-center gap-2">{renderBadges('groupA')}</div>
+                            </div>
+                            <div className="text-sm text-green-900 flex flex-wrap items-center gap-2">
+                              <span className="font-bold">GRUPA 2:</span> <span className="font-bold">{entry.split.groupB?.length ?? 0}</span> djece • {entry.raspored.groupB ? (
+                                <>{entry.raspored.groupB.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupB.slot ? `${entry.raspored.groupB.slot} - ${getEndTime(entry.raspored.groupB.slot)}` : ''} • {entry.raspored.groupB.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
+                              ) : 'Nije postavljen'}
+                              <div className="inline-flex items-center gap-2">{renderBadges('groupB')}</div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-sm text-green-900 flex flex-wrap items-center gap-2">
+                            <span className="font-bold">{entry?.split?.groupA?.length ?? 0}</span> djece • {entry.raspored.single ? (
+                              <>{entry.raspored.single.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.single.slot ? `${entry.raspored.single.slot} - ${getEndTime(entry.raspored.single.slot)}` : ''} • {entry.raspored.single.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
+                            ) : 'Nije postavljen'}
+                            <div className="inline-flex items-center gap-2">{renderBadges('single')}</div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+            {expandedRazred === r && (
+              <div className="px-4 pb-4 space-y-6">
+                {/* Sadržaj koraka */}
+                <div className="space-y-4">
+                      {/* Step 1: Muallim */}
+                      {isStepActive(r, 1) ? (
+                        <div
+                          className={`bg-white border rounded-lg p-4 shadow-sm flex flex-col transition-all duration-300 ${
+                            isStepSaved(r, 1) ? 'border-green-200 shadow-green-50' : 'border-gray-200'
+                          }`}
+                        >
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-3">
                             <div
@@ -1464,7 +1886,7 @@ const renderScheduleBoard = (
                       </div>
                     )}
 
-                    {/* Step 3: Grupe */}
+                    {/* Step 3: Postavke grupa */}
                     {isStepActive(r, 3) ? (
                       <div
                         className={`bg-white border rounded-lg p-4 shadow-sm flex flex-col transition-all duration-300 ${
@@ -1482,58 +1904,33 @@ const renderScheduleBoard = (
                             >
                               3
                             </div>
-                            <p className="text-sm font-semibold text-gray-900">Odabir grupa</p>
+                            <p className="text-sm font-semibold text-gray-900">Postavke grupa</p>
                           </div>
-                          <div className="flex items-center gap-3">
-                            {(!isStepSaved(r, 3) || isStepEditing(r, 3)) && (() => {
-                              const splitState = data.korak3[r]?.split ?? { enabled: false };
-                              const selectionDone = data.korak3[r]?.split?.selectionDone ?? false;
-                              const isDisabled = !selectionDone;
-                              return (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm text-gray-700 font-medium">Podjela u grupe</span>
-                                  <label className={`relative inline-flex items-center ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
-                                    <input
-                                      type="checkbox"
-                                      checked={splitState.enabled}
-                                      onChange={() => setSplit(r, !splitState.enabled)}
-                                      disabled={isDisabled}
-                                      className="sr-only peer"
-                                    />
-                                    <div className={`relative w-11 h-6 rounded-full transition-colors ${
-                                      splitState.enabled
-                                        ? 'bg-green-600'
-                                        : 'bg-gray-300'
-                                    } ${isDisabled ? 'opacity-50' : ''}`}>
-                                      <div className={`absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-transform ${
-                                        splitState.enabled ? 'translate-x-5' : 'translate-x-0'
-                                      }`}></div>
-                                    </div>
-                                  </label>
-                                </div>
-                              );
-                            })()}
-                            {isStepSaved(r, 3) && !isStepEditing(r, 3) && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs px-3 py-1 rounded-full bg-green-100 text-green-800 border border-green-200 flex items-center gap-1 font-semibold">
-                                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                  </svg>
-                                  POSTAVLJENO
-                                </span>
-                                <button
-                                  onClick={() => startEditingStep(r, 3)}
-                                  className="w-8 h-8 rounded-full border border-orange-400 bg-white hover:bg-orange-50 flex items-center justify-center transition-colors"
-                                >
-                                  <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                  </svg>
-                                </button>
-                              </div>
-                            )}
-                          </div>
+                          {isStepSaved(r, 3) && !isStepEditing(r, 3) && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs px-3 py-1 rounded-full bg-green-100 text-green-800 border border-green-200 flex items-center gap-1 font-semibold">
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                                POSTAVLJENO
+                              </span>
+                              <button
+                                onClick={() => startEditingStep(r, 3)}
+                                className="w-8 h-8 rounded-full border border-orange-400 bg-white hover:bg-orange-50 flex items-center justify-center transition-colors"
+                              >
+                                <svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                            </div>
+                          )}
                         </div>
                         {renderSplitControls(r, isStepSaved(r, 3) && !isStepEditing(r, 3))}
+                        {(!isStepSaved(r, 3) || isStepEditing(r, 3)) && (
+                          <div>
+                            {renderGroupSettings(r, false)}
+                          </div>
+                        )}
                         {(!isStepSaved(r, 3) || isStepEditing(r, 3)) && (
                           <div className="flex flex-row items-center justify-end gap-2 mt-3">
                             {isStepEditing(r, 3) && (
@@ -1583,21 +1980,89 @@ const renderScheduleBoard = (
           </div>
         );
       })}
+      </div>
+      <div className="space-y-4">
+        {renderOccupiedSlotsPanel(expandedRazred ?? undefined)}
+      </div>
+    </div>
+  );
+
+const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
+  const entry = data.korak3[razred] ?? defaultRazredState();
+  const splitOn = entry.split.enabled;
+  const settings = entry.settings ?? { single: { kuran: false, sufara: false } };
+  const base = { kuran: false, sufara: false };
+
+  const renderCard = (
+    label: string,
+    target: 'single' | 'groupA' | 'groupB',
+    state: { kuran: boolean; sufara: boolean },
+  ) => (
+    <div className="flex flex-col gap-3 p-3 border border-gray-200 rounded-lg bg-white shadow-sm h-full">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold text-gray-900">{label}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        {(['kuran', 'sufara'] as const).map((field) => (
+          <label key={field} className="inline-flex items-center gap-2 text-sm font-medium text-gray-800">
+            <span className="capitalize">{field === 'kuran' ? 'Kuran' : 'Sufara'}</span>
+            <div className="relative inline-flex items-center">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={state[field]}
+                disabled={isReadOnly}
+                onChange={() => setGroupSetting(razred, target, field)}
+              />
+              <div
+                className={`w-10 h-5 rounded-full transition-colors ${
+                  state[field] ? 'bg-emerald-500' : 'bg-gray-300'
+                } ${isReadOnly ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <div
+                  className={`absolute top-[2px] left-[2px] h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                    state[field] ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </div>
+            </div>
+          </label>
+        ))}
+      </div>
     </div>
   );
 
   return (
+    <div className="p-4 mt-3 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-gray-900">Postavke grupa</p>
+          <p className="text-xs text-gray-600">Odaberi da li grupa radi Kuran i/ili Sufaru.</p>
+        </div>
+      </div>
+      {splitOn ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {renderCard('Grupa 1', 'groupA', settings.groupA ?? settings.single ?? base)}
+          {renderCard('Grupa 2', 'groupB', settings.groupB ?? base)}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1">
+          {renderCard('Jedna grupa', 'single', settings.single ?? base)}
+        </div>
+      )}
+    </div>
+  );
+};
+
+  return (
     <div className="bg-gray-50 min-h-full p-6 lg:p-10">
-      <div className="max-w-6xl mx-auto">
+      <div className="w-full max-w-none mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Setup nastavne godine</h1>
             <p className="text-sm text-gray-600 mt-1">
               Korak-po-korak: osnovni podaci → odabir razreda → dodjela učenika (sa opcijom split).
             </p>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="px-3 py-1 rounded-full bg-green-100 text-green-800 font-semibold">Jedan JSON za backend</span>
           </div>
         </div>
 

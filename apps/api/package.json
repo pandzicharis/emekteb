@@ -18,6 +18,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage"
   },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
   "dependencies": {
     "@emekteb/shared-types": "*",
     "@emekteb/shared-utils": "*",

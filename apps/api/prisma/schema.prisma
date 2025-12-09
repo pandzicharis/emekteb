@@ -212,3 +212,22 @@ enum StatusImporta {
     NEUSPJESAN
     DJELOMICNO_USPJESAN
 }
+
+// ============================================
+// RAZREDI
+// ============================================
+
+enum Ilmihal {
+    ILMIHAL_I   @map("ILMIHAL I")
+    ILMIHAL_II  @map("ILMIHAL II")
+    ILMIHAL_III @map("ILMIHAL III")
+}
+
+model Razred {
+    id      String  @id @default(uuid())
+    name    String  @unique
+    ilmihal Ilmihal
+    status  Boolean @default(true)
+
+    @@map("razredi")
+}
