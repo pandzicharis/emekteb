@@ -42,6 +42,12 @@ const RAZREDI = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]; // 0 = predškolci
 const WEEKEND_DAYS: Schedule['day'][] = ['subota', 'nedjelja'];
 const SLOT_TIMES = ['09:00', '09:45', '10:30', '11:15', '12:00', '12:45', '13:30', '14:15'];
 
+// Timeline constants
+const TIMELINE_START_HOUR = 8; // 08:00
+const TIMELINE_END_HOUR = 16; // 16:00
+const TIMELINE_HEIGHT = 480; // px
+const SLOT_DURATION_OPTIONS = [30, 45, 60, 90, 120]; // minutes
+
 const labelGrupa = (razred: number) => (razred === 0 ? 'Predškolci' : `${razred}. razred`);
 
 function razredInfo(razred: number) {
@@ -51,12 +57,43 @@ function razredInfo(razred: number) {
   return { label: 'ILMIHAL 3', color: 'bg-amber-100 text-amber-800 border-amber-200' };
 }
 
-const getEndTime = (startTime: string): string => {
+const getEndTime = (startTime: string, duration: number = 45): string => {
   const [hours, minutes] = startTime.split(':').map(Number);
-  const totalMinutes = hours * 60 + minutes + 45;
+  const totalMinutes = hours * 60 + minutes + duration;
   const endHours = Math.floor(totalMinutes / 60);
   const endMinutes = totalMinutes % 60;
   return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
+};
+
+// Helper functions for timeline
+const timeToMinutes = (time: string): number => {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + minutes;
+};
+
+const minutesToTime = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+};
+
+const timeToPosition = (time: string): number => {
+  const totalMinutes = timeToMinutes(time);
+  const startMinutes = TIMELINE_START_HOUR * 60;
+  const endMinutes = TIMELINE_END_HOUR * 60;
+  const range = endMinutes - startMinutes;
+  const position = ((totalMinutes - startMinutes) / range) * TIMELINE_HEIGHT;
+  return Math.max(0, Math.min(TIMELINE_HEIGHT, position));
+};
+
+const positionToTime = (position: number): string => {
+  const startMinutes = TIMELINE_START_HOUR * 60;
+  const endMinutes = TIMELINE_END_HOUR * 60;
+  const range = endMinutes - startMinutes;
+  const minutes = startMinutes + (position / TIMELINE_HEIGHT) * range;
+  // Round to nearest 5 minutes
+  const rounded = Math.round(minutes / 5) * 5;
+  return minutesToTime(rounded);
 };
 
 type SplitState = {
@@ -70,6 +107,7 @@ type Schedule = {
   day: 'subota' | 'nedjelja';
   slot: string; // HH:mm
   location: 'ucionica' | 'divanhana';
+  duration?: number; // minutes, default 45
 };
 
 type StepData = {
@@ -116,6 +154,7 @@ export default function SetupNastavnaGodinaPage() {
   const [savedSteps, setSavedSteps] = useState<Record<number, Set<number>>>({});
   const [editingSteps, setEditingSteps] = useState<Record<number, Set<number>>>({});
   const [ucenici, setUcenici] = useState<Ucenik[]>([]);
+  const [timelineHover, setTimelineHover] = useState<Record<string, { position: number; day: Schedule['day'] }>>({});
 
   useEffect(() => {
     const fetchUcenici = async () => {
@@ -232,7 +271,7 @@ export default function SetupNastavnaGodinaPage() {
     split: { enabled: false, groupA: [] as string[], groupB: [] as string[], selectionDone: false },
   settings: { single: { kuran: false, sufara: false } },
     raspored: {
-      single: { day: 'subota' as const, slot: '', location: 'ucionica' as const },
+      single: { day: 'subota' as const, slot: '', location: 'ucionica' as const, duration: 45 },
     },
   });
 
@@ -362,7 +401,7 @@ export default function SetupNastavnaGodinaPage() {
         razred,
         grupa,
         slot: schedule.slot,
-        end: getEndTime(schedule.slot),
+        end: getEndTime(schedule.slot, schedule.duration ?? 45),
         day: schedule.day,
         location: schedule.location,
       });
@@ -441,7 +480,7 @@ export default function SetupNastavnaGodinaPage() {
       const raspored = { ...current.raspored };
       const base =
         (target === 'single' ? raspored.single : target === 'groupA' ? raspored.groupA : raspored.groupB) ??
-        { day: 'subota', slot: SLOT_TIMES[0], location: 'ucionica' as const };
+        { day: 'subota', slot: '', location: 'ucionica' as const, duration: 45 };
       const nextSchedule = { ...base, ...partial };
 
       if (target === 'single') {
@@ -1272,11 +1311,14 @@ const renderSplitControls = (razred: number, isReadOnly: boolean = false) => {
     );
   };
 
-const renderScheduleBoard = (
+const renderTimelineSchedule = (
   razred: number,
   target: 'single' | 'groupA' | 'groupB',
   label: string,
   isReadOnly: boolean = false,
+  timelineHover: Record<string, { position: number; day: Schedule['day'] }> = {},
+  setTimelineHover: React.Dispatch<React.SetStateAction<Record<string, { position: number; day: Schedule['day'] }>>> = () => {},
+  isStep4Saved: boolean = false,
 ) => {
   const entry = data.korak3[razred] ?? defaultRazredState();
   const schedule =
@@ -1286,67 +1328,313 @@ const renderScheduleBoard = (
       ? entry.raspored.groupA ?? entry.raspored.single
       : entry.raspored.groupB ?? entry.raspored.single;
   const ready = !!entry.muallimId && (entry.split.selectionDone ?? false);
+  const duration = schedule.duration ?? 45;
 
   const setField = (field: keyof Schedule, value: Schedule[keyof Schedule]) => {
     if (isReadOnly) return;
     setSchedule(razred, target, { [field]: value } as Partial<Schedule>);
   };
 
-  // Vraća sve već zauzete grupe u istom terminu/lokaciji (dozvoljavamo overlap)
-  const findSlotConflicts = (day: Schedule['day'], slot: string, location: Schedule['location']) => {
-    const conflicts: { razred: number; grupa: 'single' | 'groupA' | 'groupB' }[] = [];
+  // Vraća sve već zauzete grupe u istom terminu/lokaciji
+  const findSlotConflicts = (day: Schedule['day'], slot: string, location: Schedule['location'], slotDuration: number) => {
+    const conflicts: { razred: number; grupa: 'single' | 'groupA' | 'groupB'; start: string; end: string }[] = [];
+    const slotStart = timeToMinutes(slot);
+    const slotEnd = slotStart + slotDuration;
+
     for (const r of data.korak2.razredi) {
       const otherEntry = data.korak3[r];
       if (!otherEntry) continue;
 
-      // Single
-      if (
-        otherEntry.raspored.single?.day === day &&
-        otherEntry.raspored.single?.slot === slot &&
-        otherEntry.raspored.single?.location === location &&
-        !(r === razred && target === 'single') &&
-        !otherEntry.split.enabled
-      ) {
-        conflicts.push({ razred: r, grupa: 'single' });
-      }
+      const checkConflict = (otherSchedule: Schedule | undefined, grupa: 'single' | 'groupA' | 'groupB') => {
+        if (!otherSchedule?.slot || otherSchedule.day !== day || otherSchedule.location !== location) return;
+        if (r === razred && target === grupa) return;
 
-      // Grupa A
-      if (
-        otherEntry.raspored.groupA?.day === day &&
-        otherEntry.raspored.groupA?.slot === slot &&
-        otherEntry.raspored.groupA?.location === location &&
-        !(r === razred && target === 'groupA')
-      ) {
-        conflicts.push({ razred: r, grupa: 'groupA' });
-      }
+        const otherStart = timeToMinutes(otherSchedule.slot);
+        const otherDuration = otherSchedule.duration ?? 45;
+        const otherEnd = otherStart + otherDuration;
 
-      // Grupa B
-      if (
-        otherEntry.raspored.groupB?.day === day &&
-        otherEntry.raspored.groupB?.slot === slot &&
-        otherEntry.raspored.groupB?.location === location &&
-        !(r === razred && target === 'groupB')
-      ) {
-        conflicts.push({ razred: r, grupa: 'groupB' });
+        // Check for overlap - slots that just touch each other are NOT overlapping
+        if (slotStart < otherEnd && slotEnd > otherStart) {
+          conflicts.push({
+            razred: r,
+            grupa,
+            start: otherSchedule.slot,
+            end: getEndTime(otherSchedule.slot, otherDuration),
+          });
+        }
+      };
+
+      if (!otherEntry.split.enabled) {
+        checkConflict(otherEntry.raspored.single, 'single');
+      } else {
+        checkConflict(otherEntry.raspored.groupA, 'groupA');
+        checkConflict(otherEntry.raspored.groupB, 'groupB');
       }
     }
     return conflicts;
   };
 
+  // Generate hour markers
+  const hours: number[] = [];
+  for (let h = TIMELINE_START_HOUR; h <= TIMELINE_END_HOUR; h++) {
+    hours.push(h);
+  }
+
+  const selectedDay = schedule.day;
+  const selectedSlot = schedule.slot;
+  const selectedTop = selectedSlot && selectedDay ? timeToPosition(selectedSlot) : null;
+  const selectedHeight = selectedSlot && selectedDay
+    ? timeToPosition(getEndTime(selectedSlot, duration)) - (selectedTop ?? 0)
+    : 0;
+
+  const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>, day: Schedule['day']) => {
+    if (isReadOnly || !ready) return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const clickedTime = positionToTime(y);
+    
+    setField('day', day);
+    setField('slot', clickedTime);
+  };
+
+  const timelineKey = `${razred}-${target}`;
+  const hoverState = timelineHover[timelineKey];
+  const hoverPosition = hoverState?.position ?? null;
+  const hoverDay = hoverState?.day ?? null;
+  const hoverTime = hoverPosition !== null ? positionToTime(hoverPosition) : null;
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>, day: Schedule['day']) => {
+    if (isReadOnly || !ready) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    setTimelineHover((prev) => ({
+      ...prev,
+      [timelineKey]: { position: y, day },
+    }));
+  };
+
+  const handleMouseLeave = () => {
+    setTimelineHover((prev) => {
+      const next = { ...prev };
+      delete next[timelineKey];
+      return next;
+    });
+  };
+
+  const collectDaySlots = (day: Schedule['day'], excludeRazred?: number, excludeTarget?: 'single' | 'groupA' | 'groupB') => {
+    const slots: {
+      start: string;
+      end: string;
+      label: string;
+      color: string;
+      hasOverlap?: boolean;
+      stackIndex?: number;
+      stackCount?: number;
+      startMin?: number;
+      endMin?: number;
+    }[] = [];
+
+    // Only collect slots for the selected location
+    const targetLocation = schedule.location;
+
+    for (const r of data.korak2.razredi) {
+      const entry = data.korak3[r];
+      if (!entry) continue;
+      
+      // Skip this razred's slot if it's the current one being edited (not yet saved)
+      const isCurrentRazredPending = excludeRazred !== undefined && r === excludeRazred;
+      
+      const baseLabel = labelGrupa(r);
+
+      const pushSlot = (sch?: Schedule, grupa?: string, grupaTarget?: 'single' | 'groupA' | 'groupB') => {
+        // Filter by location and day
+        if (!sch?.slot || sch.day !== day || sch.location !== targetLocation) return;
+        
+        // Exclude the current slot being edited (not yet saved)
+        if (isCurrentRazredPending && excludeTarget === grupaTarget) return;
+        
+        const dur = sch.duration ?? 45;
+        const startMin = timeToMinutes(sch.slot);
+        const endMin = startMin + dur;
+        slots.push({
+          start: sch.slot,
+          end: getEndTime(sch.slot, dur),
+          label: grupa ? `${baseLabel} • ${grupa}` : baseLabel,
+          color: entry.split.enabled
+            ? grupa === 'Grupa 2'
+              ? 'bg-blue-100 border-blue-300 text-blue-900'
+              : 'bg-blue-50 border-blue-200 text-blue-900'
+            : 'bg-blue-50 border-blue-200 text-blue-900',
+          startMin,
+          endMin,
+        });
+      };
+
+      if (entry.split.enabled) {
+        pushSlot(entry.raspored.groupA, 'Grupa 1', 'groupA');
+        pushSlot(entry.raspored.groupB, 'Grupa 2', 'groupB');
+      } else {
+        pushSlot(entry.raspored.single, '', 'single');
+      }
+    }
+
+    // Improved stacking algorithm for calendar-like layout
+    // Sort by start time, then by end time for slots starting at the same time
+    const sorted = [...slots].sort((a, b) => {
+      const startDiff = (a.startMin ?? 0) - (b.startMin ?? 0);
+      if (startDiff !== 0) return startDiff;
+      return (a.endMin ?? 0) - (b.endMin ?? 0);
+    });
+
+    // Track active slots to assign columns
+    const active: { end: number; col: number; idx: number }[] = [];
+
+    sorted.forEach((slot, idx) => {
+      const start = slot.startMin ?? timeToMinutes(slot.start);
+      const end = slot.endMin ?? timeToMinutes(slot.end);
+
+      // Remove slots that have ended before or exactly when this one starts (no overlap)
+      for (let i = active.length - 1; i >= 0; i--) {
+        if (active[i].end <= start) {
+          active.splice(i, 1);
+        }
+      }
+
+      // Find the first available column (0-indexed)
+      let col = -1;
+      const usedCols = new Set(active.map(a => a.col));
+      for (let c = 0; c <= active.length; c++) {
+        if (!usedCols.has(c)) {
+          col = c;
+          break;
+        }
+      }
+
+      // If no column found, create new one
+      if (col === -1) {
+        col = active.length;
+      }
+
+      // Add this slot to active list
+      active.push({ end, col, idx });
+
+      // Store initial stack info
+      sorted[idx] = {
+        ...sorted[idx],
+        stackIndex: col,
+      };
+    });
+
+    // Calculate max stack count for each slot (max concurrent slots at any point during its lifetime)
+    // For each slot, find the maximum number of slots that are active simultaneously at any point
+    sorted.forEach((slot, idx) => {
+      const start = slot.startMin ?? timeToMinutes(slot.start);
+      const end = slot.endMin ?? timeToMinutes(slot.end);
+      
+      // Find all slots that overlap with this one
+      // Slots that just touch each other (one ends when other starts) are NOT overlapping
+      const overlappingSlots = sorted.filter((other, otherIdx) => {
+        if (otherIdx === idx) return false;
+        const otherStart = other.startMin ?? timeToMinutes(other.start);
+        const otherEnd = other.endMin ?? timeToMinutes(other.end);
+        // True overlap: they share some actual time period (not just touching)
+        return start < otherEnd && end > otherStart;
+      });
+
+      // The max count is 1 (this slot) + number of overlapping slots
+      // But we need to find the maximum concurrent count at any single point in time
+      // Create time points at start and end of each overlapping slot
+      const timePoints = new Set<number>();
+      timePoints.add(start);
+      // Don't add 'end' point - slots that end exactly when another starts don't overlap
+      overlappingSlots.forEach(other => {
+        const otherStart = other.startMin ?? timeToMinutes(other.start);
+        const otherEnd = other.endMin ?? timeToMinutes(other.end);
+        // Only consider time points within our slot's duration (exclusive of end)
+        if (otherStart >= start && otherStart < end) timePoints.add(otherStart);
+        if (otherEnd > start && otherEnd < end) timePoints.add(otherEnd);
+      });
+
+      // For each time point, count how many slots are active at that moment
+      // A slot is active if timePoint is >= start and < end (end is exclusive)
+      let maxCount = 1;
+      if (timePoints.size === 0) {
+        // No overlapping slots, so this slot is alone
+        maxCount = 1;
+      } else {
+        timePoints.forEach(timePoint => {
+          let count = 1; // this slot is always active
+          sorted.forEach((other, otherIdx) => {
+            if (otherIdx === idx) return;
+            const otherStart = other.startMin ?? timeToMinutes(other.start);
+            const otherEnd = other.endMin ?? timeToMinutes(other.end);
+            // Slot is active if timePoint is in [start, end) - end is exclusive
+            if (timePoint >= otherStart && timePoint < otherEnd) {
+              count++;
+            }
+          });
+          maxCount = Math.max(maxCount, count);
+        });
+      }
+
+      sorted[idx] = {
+        ...sorted[idx],
+        stackCount: maxCount,
+      };
+    });
+
+    // Mark overlap if stackCount > 1
+    const finalized = sorted.map((s) => ({
+      ...s,
+      hasOverlap: (s.stackCount ?? 1) > 1,
+    }));
+
+    return finalized;
+  };
+
+  // Exclude current razred/target slot from occupied slots if step 4 is not saved
+  // This ensures the preview slot doesn't appear as an occupied slot
+  const currentRazredPending = !isStep4Saved ? razred : undefined;
+  const subotaSlots = collectDaySlots('subota', currentRazredPending, target);
+  const nedjeljaSlots = collectDaySlots('nedjelja', currentRazredPending, target);
+
   return (
-    <div className="rounded-xl border border-gray-200 bg-white shadow-md" style={{ minHeight: 420 }}>
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <span className="text-sm font-semibold text-gray-900">{label}</span>
-        <span className="text-xs text-gray-500 font-medium">
-          {schedule.day === 'subota' ? 'Subota' : 'Nedjelja'} • {schedule.slot ? `${schedule.slot} - ${getEndTime(schedule.slot)}` : 'Nije odabrano'} •{' '}
-          {schedule.location === 'ucionica' ? 'Učionica' : 'Divanhana'}
+    <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div>
+            <span className="text-base font-medium text-gray-900 block">{label}</span>
+            {schedule.slot && (
+              <span className="text-sm text-gray-500 font-normal">
+                {schedule.day === 'subota' ? 'Subota' : 'Nedjelja'} • {schedule.slot} - {getEndTime(schedule.slot, duration)} • {schedule.location === 'ucionica' ? 'Učionica' : 'Divanhana'}
         </span>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="p-5 space-y-5">
-        <div className="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-4 py-3">
-          <span className="text-xs font-semibold text-gray-600">Lokacija</span>
-          <div className="inline-flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-full p-1">
+      <div className="p-6 space-y-5">
+        {/* Location selector - Google Meet style */}
+        <div className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-5 py-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <div>
+              <span className="text-sm font-medium text-gray-900 block">Lokacija</span>
+              <span className="text-xs text-gray-500">Odaberite gdje će se održati nastava</span>
+            </div>
+          </div>
+          <div className="inline-flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg p-1">
             {(['ucionica', 'divanhana'] as const).map((loc) => {
               const active = schedule.location === loc;
               return (
@@ -1354,10 +1642,10 @@ const renderScheduleBoard = (
                   key={loc}
                   onClick={() => setField('location', loc)}
                   disabled={ready === false || isReadOnly}
-                  className={`px-4 py-2 rounded-full text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
                     active
-                      ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white shadow'
-                      : 'text-gray-700 hover:bg-white'
+                      ? 'bg-white text-blue-700 shadow-sm border border-gray-200'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
                   }`}
                 >
                   {loc === 'ucionica' ? 'Učionica' : 'Divanhana'}
@@ -1367,121 +1655,292 @@ const renderScheduleBoard = (
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {WEEKEND_DAYS.map((day) => {
-            const dayActive = schedule.day === day;
+        {/* Duration selector - Google Meet style */}
+        <div className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-5 py-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <span className="text-sm font-medium text-gray-900 block">Dužina slota</span>
+              <span className="text-xs text-gray-500">Odaberite trajanje nastave</span>
+            </div>
+          </div>
+          <div className="inline-flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg p-1">
+            {SLOT_DURATION_OPTIONS.map((dur) => {
+              const active = duration === dur;
             return (
-              <div
-                key={day}
-                className={`border rounded-lg p-3 transition-all ${
-                  dayActive 
-                    ? 'ring-1 ring-blue-400 border-blue-400 bg-blue-50 shadow-sm' 
-                    : 'border-gray-200 bg-gray-50'
+                <button
+                  key={dur}
+                  onClick={() => setField('duration', dur)}
+                  disabled={isReadOnly}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    active
+                      ? 'bg-white text-blue-700 shadow-sm border border-gray-200'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
+                  }`}
+                >
+                  {dur} min
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Combined Timeline for both days - Google Meet style */}
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+          {/* Header with day labels */}
+          <div className="flex border-b border-gray-200 bg-white">
+            <div className="w-16 border-r border-gray-200 px-3 py-4 bg-gray-50/50 flex items-center justify-center">
+              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="flex-1 grid grid-cols-2">
+                  <button
+                onClick={() => setField('day', 'subota')}
+                    disabled={ready === false || isReadOnly}
+                className={`px-6 py-4 text-sm font-medium border-r border-gray-200 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                  selectedDay === 'subota'
+                    ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
+                    : 'bg-white text-gray-600 hover:bg-gray-50'
                 }`}
               >
-                <div className="flex items-center justify-center mb-2">
-                  <button
-                    onClick={() => setField('day', day)}
-                    disabled={ready === false || isReadOnly}
-                    className={`px-4 py-2 rounded-lg text-sm font-bold border transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                      dayActive
-                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-600 shadow-md scale-105'
-                        : 'bg-white text-gray-800 border-gray-200 hover:border-blue-400 hover:bg-blue-50'
-                    }`}
-                  >
-                    {day === 'subota' ? 'Subota' : 'Nedjelja'}
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  Subota
+                </span>
+              </button>
+              <button
+                onClick={() => setField('day', 'nedjelja')}
+                disabled={ready === false || isReadOnly}
+                className={`px-6 py-4 text-sm font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                  selectedDay === 'nedjelja'
+                    ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
+                    : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Nedjelja
+                </span>
                   </button>
+            </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  {SLOT_TIMES.map((t) => {
-                    const conflicts = findSlotConflicts(day, t, schedule.location);
-                    const active = dayActive && schedule.slot === t;
-                    const showConflict = conflicts.length > 0;
-                    const conflictLabels = conflicts.map((c) => {
-                      if (c.grupa === 'groupA') return `${labelGrupa(c.razred)} • Grupa 1`;
-                      if (c.grupa === 'groupB') return `${labelGrupa(c.razred)} • Grupa 2`;
-                      return labelGrupa(c.razred); // single grupa: samo razred
-                    });
-                    const activeConflict = showConflict && active;
-                    const passiveConflict = showConflict && !active;
+          {/* Timeline container */}
+          <div className="relative flex bg-white">
+            {/* Time labels column - narrower */}
+            <div className="w-16 border-r border-gray-200 bg-gray-50/30 relative" style={{ height: `${TIMELINE_HEIGHT}px` }}>
+              {hours.map((hour) => {
+                const time = `${hour.toString().padStart(2, '0')}:00`;
+                const position = timeToPosition(time);
                     return (
-                      <button
-                        key={`${day}-${t}`}
-                        onClick={() => {
-                          setField('day', day);
-                          setField('slot', t);
-                        }}
-                        disabled={!dayActive || ready === false || isReadOnly}
-                        className={`relative text-left rounded-lg border text-[11px] font-semibold transition flex flex-row items-stretch gap-0 ${
-                          activeConflict
-                            ? 'bg-orange-50 text-orange-900 border-orange-300 shadow-[0_1px_4px_rgba(249,115,22,0.35)]'
-                            : passiveConflict
-                            ? 'bg-purple-50 text-purple-900 border-purple-300 shadow-[0_1px_4px_rgba(168,85,247,0.35)]'
-                            : active
-                            ? 'bg-emerald-50 text-emerald-900 border-emerald-300 shadow-sm'
-                            : 'bg-white text-gray-700 border-gray-200 hover:border-emerald-200'
-                        } disabled:opacity-50 disabled:cursor-not-allowed`}
-                      >
+                  <div
+                    key={hour}
+                    className="absolute left-0 right-0 flex items-center"
+                    style={{ top: `${position}px`, height: `${TIMELINE_HEIGHT / (TIMELINE_END_HOUR - TIMELINE_START_HOUR)}px` }}
+                  >
+                    <div className="w-full text-xs font-semibold text-gray-700 text-center">
+                      {hour}:00
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Timeline areas for both days */}
+            <div className="flex-1 grid grid-cols-2">
+              {WEEKEND_DAYS.map((day) => {
+                const dayActive = selectedDay === day;
+                const daySlots = day === 'subota' ? subotaSlots : nedjeljaSlots;
+                const daySelectedTop = dayActive && selectedSlot ? selectedTop : null;
+                const daySelectedHeight = dayActive && selectedSlot ? selectedHeight : 0;
+
+                return (
+                  <div
+                    key={day}
+                    className={`relative border-r last:border-r-0 border-gray-100 cursor-pointer transition-colors ${
+                      dayActive ? 'bg-blue-50/10' : 'bg-white hover:bg-gray-50/30'
+                    }`}
+                    style={{ height: `${TIMELINE_HEIGHT}px` }}
+                    onClick={(e) => handleTimelineClick(e, day)}
+                    onMouseMove={(e) => handleMouseMove(e, day)}
+                    onMouseLeave={handleMouseLeave}
+                  >
+                    {/* Hour grid lines */}
+                    {hours.map((hour) => {
+                      const time = `${hour.toString().padStart(2, '0')}:00`;
+                      const position = timeToPosition(time);
+                      return (
                         <div
-                          className={`w-2 rounded-l-lg ${
-                            activeConflict
-                              ? 'bg-orange-500'
-                              : passiveConflict
-                              ? 'bg-purple-500'
-                              : active
-                              ? 'bg-emerald-500'
-                              : 'bg-emerald-200'
-                          }`}
+                          key={hour}
+                          className="absolute left-0 right-0 border-t border-gray-200"
+                          style={{ top: `${position}px` }}
                         />
-                        <div className="flex-1 px-3 py-3 flex flex-col gap-1 overflow-hidden">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs font-bold">{t} - {getEndTime(t)}</span>
-                            {showConflict && (
-                              <span
-                                className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${
-                                  activeConflict
-                                    ? 'bg-orange-100 border-orange-300 text-orange-700'
-                                    : 'bg-purple-100 border-purple-300 text-purple-700'
-                                }`}
-                                title={conflictLabels.join('\n')}
-                              >
-                                {activeConflict ? (
-                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M11 2l-7 9h5v7l7-9h-5V2z" />
-                                  </svg>
-                                ) : (
-                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M10 2a1 1 0 01.894.553l6 12A1 1 0 0116 16H4a1 1 0 01-.894-1.447l6-12A1 1 0 0110 2zm0 5.5a1 1 0 00-.993.883L9 8.5v2a1 1 0 001.993.117L11 10.5v-2a1 1 0 00-1-1zm0 6a1.25 1.25 0 100-2.5 1.25 1.25 0 000 2.5z" />
-                                  </svg>
-                                )}
-                              </span>
+                      );
+                    })}
+
+                    {/* Half-hour markers */}
+                    {hours.slice(0, -1).map((hour) => {
+                      const time = `${hour.toString().padStart(2, '0')}:30`;
+                      const position = timeToPosition(time);
+                      return (
+                        <div
+                          key={`${hour}-30`}
+                          className="absolute left-0 right-0 border-t border-dashed border-gray-100"
+                          style={{ top: `${position}px` }}
+                        />
+                      );
+                    })}
+
+                    {/* Hover indicator - Google Meet style - always visible on hover */}
+                    {hoverPosition !== null && hoverDay === day && !isReadOnly && (
+                      <div
+                        className="absolute left-0 right-0 pointer-events-none transition-opacity duration-150"
+                        style={{ top: `${hoverPosition}px`, zIndex: 35 }}
+                      >
+                        <div className="absolute left-0 right-0 h-0.5 bg-blue-500"></div>
+                        <div className="absolute left-2 top-1/2 -translate-y-1/2 bg-blue-600 text-white text-xs font-medium px-2 py-1 rounded shadow-md whitespace-nowrap">
+                          {hoverTime}
+                        </div>
+                      </div>
+                    )}
+
+
+                    {/* Occupied slots (all razredi) */}
+                    {daySlots.map((slot, idx) => {
+                      const top = timeToPosition(slot.start);
+                      const height = timeToPosition(slot.end) - top;
+                      const isOverlap = !!slot.hasOverlap;
+                      const columns = slot.stackCount ?? 1;
+                      const index = slot.stackIndex ?? 0;
+                      const widthPct = 100 / columns;
+                      const leftPct = widthPct * index;
+                      const margin = 2; // gap between columns
+
+                      const styleBase = isOverlap
+                        ? 'bg-blue-100 border-blue-300 text-blue-900 shadow-sm ring-0.5 ring-blue-300/50'
+                        : 'bg-blue-50 border-blue-200 text-blue-900/90';
+
+                      // Calculate actual width and left position with margins
+                      const actualWidth = `calc(${widthPct}% - ${margin * 2}px)`;
+                      const actualLeft = `calc(${leftPct}% + ${margin}px)`;
+
+                      return (
+                        <div
+                          key={`slot-${day}-${idx}`}
+                          className={`absolute rounded-md border-[0.5px] ${styleBase} px-2 py-1 text-[11px] font-medium`}
+                          style={{
+                            top: `${top}px`,
+                            height: `${Math.max(height, 22)}px`,
+                            left: actualLeft,
+                            width: actualWidth,
+                            minHeight: '22px',
+                            zIndex: isOverlap ? 15 : 10,
+                          }}
+                          title={`${slot.start} - ${slot.end} • ${slot.label}`}
+                        >
+                          <div className="flex flex-col h-full justify-center overflow-hidden">
+                            <div className="text-[10px] font-semibold leading-tight truncate">
+                              {slot.start} - {slot.end}
+                            </div>
+                            {height >= 30 && (
+                              <div className="text-[10px] leading-tight truncate mt-0.5 opacity-90">
+                                {slot.label}
+                              </div>
+                            )}
+                            {height < 30 && (
+                              <div className="text-[9px] leading-tight truncate opacity-75">
+                                {slot.label.split(' • ')[0]}
+                              </div>
                             )}
                           </div>
-                          {showConflict && (
-                            <div
-                              className={`text-[10px] font-semibold leading-tight ${
-                                activeConflict ? 'text-orange-800' : 'text-purple-800'
-                              }`}
-                              title={conflictLabels.join(', ')}
-                            >
-                              {conflictLabels.map((label) => (
-                                <div key={label} className="truncate">
-                                  {label}
-                                </div>
-                              ))}
-                            </div>
-                          )}
                         </div>
-                      </button>
+                      );
+                    })}
+
+                    {/* Selected slot preview - full blue like before, but not added to occupied slots until saved */}
+                    {daySelectedTop !== null && dayActive && selectedSlot && (
+                      <div
+                        className="absolute left-2 right-2 rounded-lg bg-blue-600 text-white flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl border-[0.5px] border-blue-400"
+                        style={{
+                          top: `${daySelectedTop}px`,
+                          height: `${Math.max(daySelectedHeight, 40)}px`,
+                          minHeight: '40px',
+                          zIndex: 40,
+                        }}
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                          </svg>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-semibold truncate">
+                              {selectedSlot} - {getEndTime(selectedSlot, duration)}
+                            </div>
+                            <div className="text-xs font-normal text-blue-100 truncate mt-0.5">
+                              {schedule.location === 'ucionica' ? 'Učionica' : 'Divanhana'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-xs font-medium text-blue-100 bg-blue-700/50 px-2 py-1 rounded ml-2 flex-shrink-0 whitespace-nowrap">
+                          {duration} min
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Click hint - Google Meet style */}
+                    {dayActive && !selectedSlot && !isReadOnly && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="text-xs text-gray-400 font-normal bg-white/90 backdrop-blur-sm px-3 py-2 rounded-md border border-gray-200 shadow-sm">
+                          Kliknite da odaberete vrijeme
+                        </div>
+                      </div>
+                    )}
+                  </div>
                     );
                   })}
                 </div>
+          </div>
+        </div>
+
+        {/* Conflicts warning */}
+        {schedule.slot && schedule.day && (() => {
+          const conflicts = findSlotConflicts(schedule.day, schedule.slot, schedule.location, duration);
+          return conflicts.length > 0 ? (
+            <div className="bg-orange-50 border-2 border-orange-300 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <div className="flex-1">
+                  <div className="text-sm font-bold text-orange-900 mb-1">Upozorenje: Konflikt vremena</div>
+                  <div className="text-xs text-orange-800 space-y-1">
+                    {conflicts.map((conflict, idx) => {
+                      const conflictLabel = conflict.grupa === 'groupA'
+                        ? `${labelGrupa(conflict.razred)} • Grupa 1`
+                        : conflict.grupa === 'groupB'
+                        ? `${labelGrupa(conflict.razred)} • Grupa 2`
+                        : labelGrupa(conflict.razred);
+                      return (
+                        <div key={idx}>
+                          {conflictLabel} ({conflict.start} - {conflict.end})
               </div>
             );
           })}
         </div>
-
+                </div>
+              </div>
+            </div>
+          ) : null;
+        })()}
       </div>
     </div>
   );
@@ -1544,19 +2003,19 @@ const renderScheduleBoard = (
                 <>
                   {entry.raspored.groupA && (
                     <span className="text-sm text-green-900">
-                      <span className="font-bold">GRUPA 1:</span> {entry.raspored.groupA.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupA.slot ? `${entry.raspored.groupA.slot} - ${getEndTime(entry.raspored.groupA.slot)}` : ''} • {entry.raspored.groupA.location === 'ucionica' ? 'Učionica' : 'Divanhana'}
+                      <span className="font-bold">GRUPA 1:</span> {entry.raspored.groupA.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupA.slot ? `${entry.raspored.groupA.slot} - ${getEndTime(entry.raspored.groupA.slot, entry.raspored.groupA.duration ?? 45)}` : ''} • {entry.raspored.groupA.location === 'ucionica' ? 'Učionica' : 'Divanhana'}
                     </span>
                   )}
                   {entry.raspored.groupB && (
                     <span className="text-sm text-green-900">
-                      <span className="font-bold">GRUPA 2:</span> {entry.raspored.groupB.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupB.slot ? `${entry.raspored.groupB.slot} - ${getEndTime(entry.raspored.groupB.slot)}` : ''} • {entry.raspored.groupB.location === 'ucionica' ? 'Učionica' : 'Divanhana'}
+                      <span className="font-bold">GRUPA 2:</span> {entry.raspored.groupB.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupB.slot ? `${entry.raspored.groupB.slot} - ${getEndTime(entry.raspored.groupB.slot, entry.raspored.groupB.duration ?? 45)}` : ''} • {entry.raspored.groupB.location === 'ucionica' ? 'Učionica' : 'Divanhana'}
                     </span>
                   )}
                 </>
               ) : (
                 entry.raspored.single && (
                   <span className="text-sm text-green-900">
-                    {entry.raspored.single.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.single.slot ? `${entry.raspored.single.slot} - ${getEndTime(entry.raspored.single.slot)}` : ''} • {entry.raspored.single.location === 'ucionica' ? 'Učionica' : 'Divanhana'}
+                    {entry.raspored.single.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.single.slot ? `${entry.raspored.single.slot} - ${getEndTime(entry.raspored.single.slot, entry.raspored.single.duration ?? 45)}` : ''} • {entry.raspored.single.location === 'ucionica' ? 'Učionica' : 'Divanhana'}
                   </span>
                 )
               )}
@@ -1564,11 +2023,11 @@ const renderScheduleBoard = (
           </div>
         ) : (
           <div className={`space-y-3 ${ready && (!isReadOnly || isStepEditing(razred, 4)) ? '' : 'opacity-50 pointer-events-none select-none'}`}>
-            {!splitOn && renderScheduleBoard(razred, 'single', 'Jedna grupa', isReadOnly)}
+            {!splitOn && renderTimelineSchedule(razred, 'single', 'Jedna grupa', isReadOnly, timelineHover, setTimelineHover, isStepSaved(razred, 4))}
             {splitOn && (
               <div className="space-y-3">
-                {renderScheduleBoard(razred, 'groupA', 'Grupa 1', isReadOnly)}
-                {renderScheduleBoard(razred, 'groupB', 'Grupa 2', isReadOnly)}
+                {renderTimelineSchedule(razred, 'groupA', 'Grupa 1', isReadOnly, timelineHover, setTimelineHover, isStepSaved(razred, 4))}
+                {renderTimelineSchedule(razred, 'groupB', 'Grupa 2', isReadOnly, timelineHover, setTimelineHover, isStepSaved(razred, 4))}
               </div>
             )}
           </div>
@@ -1688,13 +2147,13 @@ const renderScheduleBoard = (
                           <>
                             <div className="text-sm text-green-900 flex flex-wrap items-center gap-2">
                               <span className="font-bold">GRUPA 1:</span> <span className="font-bold">{entry.split.groupA?.length ?? 0}</span> djece • {entry.raspored.groupA ? (
-                                <>{entry.raspored.groupA.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupA.slot ? `${entry.raspored.groupA.slot} - ${getEndTime(entry.raspored.groupA.slot)}` : ''} • {entry.raspored.groupA.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
+                                <>{entry.raspored.groupA.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupA.slot ? `${entry.raspored.groupA.slot} - ${getEndTime(entry.raspored.groupA.slot, entry.raspored.groupA.duration ?? 45)}` : ''} • {entry.raspored.groupA.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
                               ) : 'Nije postavljen'}
                               <div className="inline-flex items-center gap-2">{renderBadges('groupA')}</div>
                             </div>
                             <div className="text-sm text-green-900 flex flex-wrap items-center gap-2">
                               <span className="font-bold">GRUPA 2:</span> <span className="font-bold">{entry.split.groupB?.length ?? 0}</span> djece • {entry.raspored.groupB ? (
-                                <>{entry.raspored.groupB.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupB.slot ? `${entry.raspored.groupB.slot} - ${getEndTime(entry.raspored.groupB.slot)}` : ''} • {entry.raspored.groupB.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
+                                <>{entry.raspored.groupB.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.groupB.slot ? `${entry.raspored.groupB.slot} - ${getEndTime(entry.raspored.groupB.slot, entry.raspored.groupB.duration ?? 45)}` : ''} • {entry.raspored.groupB.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
                               ) : 'Nije postavljen'}
                               <div className="inline-flex items-center gap-2">{renderBadges('groupB')}</div>
                             </div>
@@ -1702,7 +2161,7 @@ const renderScheduleBoard = (
                         ) : (
                           <div className="text-sm text-green-900 flex flex-wrap items-center gap-2">
                             <span className="font-bold">{entry?.split?.groupA?.length ?? 0}</span> djece • {entry.raspored.single ? (
-                              <>{entry.raspored.single.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.single.slot ? `${entry.raspored.single.slot} - ${getEndTime(entry.raspored.single.slot)}` : ''} • {entry.raspored.single.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
+                              <>{entry.raspored.single.day === 'subota' ? 'Subota' : 'Nedjelja'} • {entry.raspored.single.slot ? `${entry.raspored.single.slot} - ${getEndTime(entry.raspored.single.slot, entry.raspored.single.duration ?? 45)}` : ''} • {entry.raspored.single.location === 'ucionica' ? 'Učionica' : 'Divanhana'}</>
                             ) : 'Nije postavljen'}
                             <div className="inline-flex items-center gap-2">{renderBadges('single')}</div>
                           </div>
