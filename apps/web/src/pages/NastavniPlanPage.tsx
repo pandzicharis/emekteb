@@ -8,7 +8,10 @@ type Lekcija = {
   tezina: 1 | 2 | 3;
   redoslijed: number;
   aktivan: boolean;
+  tip?: 'ILMIHAL' | 'KURAN' | 'SUFARA';
 };
+
+type TipLekcije = 'ILMIHAL' | 'KURAN' | 'SUFARA';
 
 const RAZREDI = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]; // 0 = predškolci
 
@@ -20,6 +23,20 @@ function razredInfo(razred: number) {
   if (razred <= 6) return { label: 'ILMIHAL 2', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
   return { label: 'ILMIHAL 3', color: 'bg-amber-100 text-amber-800 border-amber-200' };
 }
+
+// Helper function to generate lessons for Kuran or Sufara
+const generateLekcije = (tip: 'KURAN' | 'SUFARA', razred: number): Lekcija[] => {
+  const prefix = tip === 'KURAN' ? 'Kuran' : 'Sufara';
+  return Array.from({ length: 20 }, (_, i) => ({
+    id: `${tip.toLowerCase()}-${razred}-${i + 1}-${Date.now()}`,
+    naslov: `${prefix} - Lekcija ${i + 1}`,
+    opis: `Lekcija ${i + 1} iz ${prefix.toLowerCase()}a za ${labelGrupa(razred)}`,
+    tezina: 2 as const,
+    redoslijed: i,
+    aktivan: true,
+    tip,
+  }));
+};
 
 type StepData = {
   korak1: {
@@ -34,6 +51,24 @@ type StepData = {
   korak3: {
     // po razredu
     [razred: number]: Lekcija[];
+  };
+  // Tipovi lekcija po razredu
+  tipoviLekcija: {
+    [razred: number]: TipLekcije[];
+  };
+  // Generirane lekcije za Kuran i Sufara po razredu
+  generiraneLekcije: {
+    [razred: number]: {
+      KURAN?: Lekcija[];
+      SUFARA?: Lekcija[];
+    };
+  };
+  // Odabrane lekcije iz Kuran/Sufara po razredu
+  odabraneLekcije: {
+    [razred: number]: {
+      KURAN?: string[]; // IDs
+      SUFARA?: string[]; // IDs
+    };
   };
 };
 
@@ -56,6 +91,9 @@ export default function NastavniPlanPage() {
       razredi: [],
     },
     korak3: {},
+    tipoviLekcija: {},
+    generiraneLekcije: {},
+    odabraneLekcije: {},
   });
 
   const isStep1Valid =
@@ -75,7 +113,141 @@ export default function NastavniPlanPage() {
     lekcije: data.korak3,
   };
 
-  const addLekcija = (razred: number) => {
+  const toggleTipLekcije = (razred: number, tip: TipLekcije) => {
+    setData((prev) => {
+      const currentTipovi = prev.tipoviLekcija[razred] ?? [];
+      const hasTip = currentTipovi.includes(tip);
+      
+      let newTipovi: TipLekcije[];
+      const newGeneriraneLekcije = { ...prev.generiraneLekcije };
+      const newOdabraneLekcije = { ...prev.odabraneLekcije };
+      
+      if (hasTip) {
+        // Ukloni tip
+        newTipovi = currentTipovi.filter((t) => t !== tip);
+        // Ukloni generirane lekcije (samo za KURAN i SUFARA)
+        if (tip === 'KURAN' || tip === 'SUFARA') {
+          if (newGeneriraneLekcije[razred]) {
+            const updated = { ...newGeneriraneLekcije[razred] };
+            if (tip === 'KURAN') {
+              delete updated.KURAN;
+            } else {
+              delete updated.SUFARA;
+            }
+            newGeneriraneLekcije[razred] = updated;
+          }
+          // Ukloni odabrane lekcije
+          if (newOdabraneLekcije[razred]) {
+            const updated = { ...newOdabraneLekcije[razred] };
+            if (tip === 'KURAN') {
+              delete updated.KURAN;
+            } else {
+              delete updated.SUFARA;
+            }
+            newOdabraneLekcije[razred] = updated;
+          }
+        }
+        // Ukloni lekcije iz korak3
+        const lekcije = prev.korak3[razred] ?? [];
+        const filteredLekcije = lekcije.filter((l) => l.tip !== tip);
+        return {
+          ...prev,
+          tipoviLekcija: { ...prev.tipoviLekcija, [razred]: newTipovi },
+          generiraneLekcije: newGeneriraneLekcije,
+          odabraneLekcije: newOdabraneLekcije,
+          korak3: { ...prev.korak3, [razred]: filteredLekcije },
+        };
+      } else {
+        // Dodaj tip
+        newTipovi = [...currentTipovi, tip];
+        // Generiraj lekcije za KURAN ili SUFARA
+        if (tip === 'KURAN' || tip === 'SUFARA') {
+          const generirane = generateLekcije(tip, razred);
+          if (!newGeneriraneLekcije[razred]) {
+            newGeneriraneLekcije[razred] = {};
+          }
+          newGeneriraneLekcije[razred] = {
+            ...newGeneriraneLekcije[razred],
+            [tip]: generirane,
+          };
+          
+          // Za SUFARA automatski dodaj sve lekcije
+          if (tip === 'SUFARA') {
+            const existingLekcije = prev.korak3[razred] ?? [];
+            const allSufaraIds = generirane.map((l) => l.id);
+            const newLekcije = generirane.map((l, idx) => ({
+              ...l,
+              redoslijed: existingLekcije.length + idx,
+            }));
+            return {
+              ...prev,
+              tipoviLekcija: { ...prev.tipoviLekcija, [razred]: newTipovi },
+              generiraneLekcije: newGeneriraneLekcije,
+              odabraneLekcije: {
+                ...prev.odabraneLekcije,
+                [razred]: {
+                  ...prev.odabraneLekcije[razred],
+                  SUFARA: allSufaraIds,
+                },
+              },
+              korak3: {
+                ...prev.korak3,
+                [razred]: [...existingLekcije, ...newLekcije],
+              },
+            };
+          }
+        }
+      }
+      
+      return {
+        ...prev,
+        tipoviLekcija: { ...prev.tipoviLekcija, [razred]: newTipovi },
+        generiraneLekcije: newGeneriraneLekcije,
+        odabraneLekcije: newOdabraneLekcije,
+      };
+    });
+  };
+
+  const toggleOdabranaLekcija = (razred: number, tip: 'KURAN' | 'SUFARA', lekcijaId: string) => {
+    setData((prev) => {
+      const currentOdabrane = prev.odabraneLekcije[razred]?.[tip] ?? [];
+      const isOdabrana = currentOdabrane.includes(lekcijaId);
+      
+      let newOdabrane: string[];
+      let lekcije = [...(prev.korak3[razred] ?? [])];
+      
+      if (isOdabrana) {
+        // Ukloni lekciju
+        newOdabrane = currentOdabrane.filter((id) => id !== lekcijaId);
+        lekcije = lekcije.filter((l) => l.id !== lekcijaId);
+      } else {
+        // Dodaj lekciju
+        newOdabrane = [...currentOdabrane, lekcijaId];
+        const generiraneLekcije = prev.generiraneLekcije[razred]?.[tip] ?? [];
+        const lekcija = generiraneLekcije.find((l) => l.id === lekcijaId);
+        if (lekcija) {
+          lekcije.push({ ...lekcija, redoslijed: lekcije.length });
+        }
+      }
+      
+      return {
+        ...prev,
+        odabraneLekcije: {
+          ...prev.odabraneLekcije,
+          [razred]: {
+            ...prev.odabraneLekcije[razred],
+            [tip]: newOdabrane,
+          },
+        },
+        korak3: {
+          ...prev.korak3,
+          [razred]: lekcije.map((l, idx) => ({ ...l, redoslijed: idx })),
+        },
+      };
+    });
+  };
+
+  const addLekcija = (razred: number, tip: 'ILMIHAL' | 'SUFARA' = 'ILMIHAL') => {
     const lekcije = data.korak3[razred] ?? [];
     const newLekcija: Lekcija = {
       id: `lekcija-${Date.now()}-${Math.random()}`,
@@ -84,6 +256,7 @@ export default function NastavniPlanPage() {
       tezina: 2,
       redoslijed: lekcije.length,
       aktivan: true,
+      tip,
     };
     setData((prev) => ({
       ...prev,
@@ -371,7 +544,16 @@ export default function NastavniPlanPage() {
         </div>
       )}
       {data.korak2.razredi.map((r) => {
-        const lekcije = data.korak3[r] ?? [];
+        const sveLekcije = data.korak3[r] ?? [];
+        // Prikaži samo ILMIHAL lekcije (ne prikazuj KURAN i SUFARA)
+        const lekcije = sveLekcije.filter((l) => {
+          // Ako nema tipa, provjeri ID
+          if (!l.tip) {
+            return !l.id.toLowerCase().includes('kuran') && !l.id.toLowerCase().includes('sufara');
+          }
+          // Prikaži samo ILMIHAL
+          return l.tip === 'ILMIHAL';
+        });
         const hasLekcije = lekcije.length > 0;
         return (
           <div key={r} className="border border-gray-200 rounded-lg bg-white transition-colors">
@@ -414,36 +596,271 @@ export default function NastavniPlanPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </button>
-            {hasLekcije && expandedRazred !== r && (
-              <div className="mx-4 mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                <div className="text-sm text-green-900">
-                  <span className="font-bold">{lekcije.length}</span> {lekcije.length === 1 ? 'lekcija' : 'lekcija'} dodano
+            {expandedRazred !== r && (() => {
+              const sveLekcije = data.korak3[r] ?? [];
+              const ilmihalLekcije = sveLekcije.filter((l) => l.tip === 'ILMIHAL' || (!l.tip && !l.id.toLowerCase().includes('kuran') && !l.id.toLowerCase().includes('sufara')));
+              const kuranLekcije = sveLekcije.filter((l) => l.tip === 'KURAN');
+              const sufaraLekcije = sveLekcije.filter((l) => l.tip === 'SUFARA');
+              const ukupno = ilmihalLekcije.length + kuranLekcije.length + sufaraLekcije.length;
+              
+              if (ukupno === 0) return null;
+              
+              return (
+                <div className="mx-4 mb-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* ILMIHAL grupa */}
+                    {ilmihalLekcije.length > 0 ? (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                          <span className="text-xs font-semibold text-emerald-800">
+                            ILMIHAL ({ilmihalLekcije.length})
+                          </span>
+                        </div>
+                        <div className="space-y-1 max-h-48 overflow-y-auto">
+                          {ilmihalLekcije.map((lekcija, idx) => (
+                            <div key={lekcija.id} className="flex items-center gap-2 text-xs pl-4">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                              <span className="text-emerald-700">
+                                {idx + 1}. {lekcija.naslov || 'Naslov lekcije'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 opacity-50">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                          <span className="text-xs font-semibold text-gray-500">
+                            ILMIHAL (0)
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* KURAN grupa */}
+                    {kuranLekcije.length > 0 ? (
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                          <span className="text-xs font-semibold text-amber-800">
+                            KURAN ({kuranLekcije.length})
+                          </span>
+                        </div>
+                        <div className="space-y-1 max-h-48 overflow-y-auto">
+                          {kuranLekcije.map((lekcija, idx) => (
+                            <div key={lekcija.id} className="flex items-center gap-2 text-xs pl-4">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0"></span>
+                              <span className="text-amber-700">
+                                {idx + 1}. {lekcija.naslov || 'Naslov lekcije'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 opacity-50">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                          <span className="text-xs font-semibold text-gray-500">
+                            KURAN (0)
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* SUFARA grupa */}
+                    {sufaraLekcije.length > 0 ? (
+                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+                          <span className="text-xs font-semibold text-purple-800">
+                            SUFARA ({sufaraLekcije.length})
+                          </span>
+                        </div>
+                        <div className="space-y-1 max-h-48 overflow-y-auto">
+                          {sufaraLekcije.map((lekcija, idx) => (
+                            <div key={lekcija.id} className="flex items-center gap-2 text-xs pl-4">
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
+                              <span className="text-purple-700">
+                                {idx + 1}. {lekcija.naslov || 'Naslov lekcije'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 opacity-50">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                          <span className="text-xs font-semibold text-gray-500">
+                            SUFARA (0)
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Ukupno */}
+                  <div className="text-center pt-3 mt-3 border-t border-gray-200">
+                    <span className="text-xs text-gray-600">
+                      Ukupno lekcija: <span className="font-semibold text-gray-900">{ukupno}</span>
+                    </span>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
             {expandedRazred === r && (
-              <div className="px-4 pb-4 space-y-4">
-                <div
-                  className="space-y-3"
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (draggingLekcija && draggingLekcija.razred === r) {
-                      const targetIndex = hoverDrop?.razred === r ? hoverDrop.index : lekcije.length - 1;
-                      const fromIndex = lekcije.findIndex((l) => l.id === draggingLekcija.lekcijaId);
-                      if (fromIndex !== -1 && fromIndex !== targetIndex) {
-                        reorderLekcije(r, fromIndex, targetIndex);
-                      }
-                    }
-                    setDraggingLekcija(null);
-                    setHoverDrop(null);
-                  }}
-                >
-                  {lekcije.map((lekcija, index) => {
+              <div className="px-4 pb-4 space-y-6">
+                {/* Lesson Type Selector */}
+                <div className="bg-white rounded-lg p-4 border border-gray-200">
+                  <h3 className="text-sm font-medium text-gray-900 mb-3">Tipovi lekcija</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* ILMIHAL */}
+                    {(() => {
+                      const isActive = (data.tipoviLekcija[r] ?? []).includes('ILMIHAL');
+                      return (
+                        <button
+                          onClick={() => toggleTipLekcije(r, 'ILMIHAL')}
+                          className={`relative p-3 rounded-lg border transition-colors ${
+                            isActive
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                              : 'bg-white border-gray-200 hover:border-gray-300 text-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-7 h-7 rounded flex items-center justify-center ${
+                              isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 text-left">
+                              <div className="font-medium text-sm">ILMIHAL</div>
+                              <div className="text-xs text-gray-500">Ručno dodavanje</div>
+                            </div>
+                            {isActive && (
+                              <svg className="w-4 h-4 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })()}
+                    
+                    {/* KURAN */}
+                    {(() => {
+                      const isActive = (data.tipoviLekcija[r] ?? []).includes('KURAN');
+                      const odabrane = data.odabraneLekcije[r]?.KURAN ?? [];
+                      return (
+                        <button
+                          onClick={() => toggleTipLekcije(r, 'KURAN')}
+                          className={`relative p-3 rounded-lg border transition-colors ${
+                            isActive
+                              ? 'bg-amber-50 border-amber-200 text-amber-900'
+                              : 'bg-white border-gray-200 hover:border-gray-300 text-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-7 h-7 rounded flex items-center justify-center ${
+                              isActive ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 text-left">
+                              <div className="font-medium text-sm">KURAN</div>
+                              <div className="text-xs text-gray-500">
+                                {isActive && odabrane.length > 0 ? `${odabrane.length} odabrano` : 'Odabir lekcija'}
+                              </div>
+                            </div>
+                            {isActive && (
+                              <svg className="w-4 h-4 text-amber-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })()}
+                    
+                    {/* SUFARA */}
+                    {(() => {
+                      const isActive = (data.tipoviLekcija[r] ?? []).includes('SUFARA');
+                      const sufaraLekcije = (data.korak3[r] ?? []).filter((l) => l.tip === 'SUFARA');
+                      return (
+                        <button
+                          onClick={() => toggleTipLekcije(r, 'SUFARA')}
+                          className={`relative p-3 rounded-lg border transition-colors ${
+                            isActive
+                              ? 'bg-purple-50 border-purple-200 text-purple-900'
+                              : 'bg-white border-gray-200 hover:border-gray-300 text-gray-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-7 h-7 rounded flex items-center justify-center ${
+                              isActive ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 text-left">
+                              <div className="font-medium text-sm">SUFARA</div>
+                              <div className="text-xs text-gray-500">
+                                {isActive ? `${sufaraLekcije.length} lekcija` : 'Auto dodavanje'}
+                              </div>
+                            </div>
+                            {isActive && (
+                              <svg className="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Lekcije List - Sve dodane lekcije */}
+                {lekcije.length > 0 ? (
+                  <div className="bg-white rounded-lg p-4 border border-gray-200">
+                    <h3 className="text-sm font-medium text-gray-900 mb-3">ILMIHAL lekcije ({lekcije.length})</h3>
+                    <div
+                      className="space-y-3"
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (draggingLekcija && draggingLekcija.razred === r) {
+                          const sveLekcije = data.korak3[r] ?? [];
+                          const targetIndex = hoverDrop?.razred === r ? hoverDrop.index : lekcije.length - 1;
+                          // Pronađi index u filtriranoj listi
+                          const fromIndex = lekcije.findIndex((l) => l.id === draggingLekcija.lekcijaId);
+                          if (fromIndex !== -1 && fromIndex !== targetIndex) {
+                            // Pronađi stvarni index u svim lekcijama
+                            const draggedLekcija = lekcije[fromIndex];
+                            const realFromIndex = sveLekcije.findIndex((l) => l.id === draggedLekcija.id);
+                            const realTargetLekcija = lekcije[targetIndex];
+                            const realTargetIndex = realTargetLekcija ? sveLekcije.findIndex((l) => l.id === realTargetLekcija.id) : sveLekcije.length - 1;
+                            if (realFromIndex !== -1 && realTargetIndex !== -1 && realFromIndex !== realTargetIndex) {
+                              reorderLekcije(r, realFromIndex, realTargetIndex);
+                            }
+                          }
+                        }
+                        setDraggingLekcija(null);
+                        setHoverDrop(null);
+                      }}
+                    >
+                      {lekcije.map((lekcija, index) => {
                     const isDragging = draggingLekcija?.lekcijaId === lekcija.id;
                     const isHoverTarget = hoverDrop?.razred === r && hoverDrop?.index === index;
                     const isExpanded = expandedLekcija?.razred === r && expandedLekcija?.lekcijaId === lekcija.id;
@@ -501,10 +918,21 @@ export default function NastavniPlanPage() {
                           <div className="flex-1 space-y-3">
                             {/* Header row: number, title, switch, caret */}
                             <div className="flex items-center justify-between gap-3">
-                              <div className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                              <div className="text-lg font-bold text-gray-900 flex items-center gap-2 flex-1 min-w-0">
                                 <span>#{index + 1}</span>
                                 <span>-</span>
                                 <span className="truncate">{lekcija.naslov || 'Naslov lekcije'}</span>
+                                {lekcija.tip && (
+                                  <span className={`text-xs px-2 py-0.5 rounded font-medium flex-shrink-0 ${
+                                    lekcija.tip === 'ILMIHAL'
+                                      ? 'bg-emerald-50 text-emerald-700'
+                                      : lekcija.tip === 'KURAN'
+                                      ? 'bg-amber-50 text-amber-700'
+                                      : 'bg-purple-50 text-purple-700'
+                                  }`}>
+                                    {lekcija.tip}
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center gap-2 flex-shrink-0">
                                 <label className="relative inline-flex items-center cursor-pointer">
@@ -612,13 +1040,85 @@ export default function NastavniPlanPage() {
                       </div>
                     );
                   })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500 text-sm bg-gray-50 rounded-lg border border-gray-200">
+                    Nema dodanih lekcija. Aktiviraj tipove lekcija iznad i odaberi ih.
+                  </div>
+                )}
+
+                {/* Dodaj ILMIHAL lekciju */}
+                {(data.tipoviLekcija[r] ?? []).includes('ILMIHAL') && (
+                  <button
+                    onClick={() => addLekcija(r, 'ILMIHAL')}
+                    className="w-full px-4 py-2.5 border border-dashed border-gray-300 rounded text-sm text-gray-600 hover:border-gray-400 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Dodaj lekciju
+                  </button>
+                )}
+
+                {/* KURAN Lekcije Selection Section */}
+                {(() => {
+                  const isKuranActive = (data.tipoviLekcija[r] ?? []).includes('KURAN');
+                  const generirane = data.generiraneLekcije[r]?.KURAN ?? [];
+                  const odabrane = data.odabraneLekcije[r]?.KURAN ?? [];
+                  
+                  if (!isKuranActive || generirane.length === 0) return null;
+                  
+                  return (
+                    <div className="bg-white rounded-lg p-4 border border-gray-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-medium text-gray-900">Odaberi KURAN lekcije</h3>
+                        {odabrane.length > 0 && (
+                          <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
+                            {odabrane.length} odabrano
+                          </span>
+                        )}
+                      </div>
+                      <div className="border border-gray-200 rounded-lg p-3 max-h-64 overflow-y-auto bg-gray-50">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {generirane.map((lekcija) => {
+                            const isOdabrana = odabrane.includes(lekcija.id);
+                            return (
+                              <label
+                                key={lekcija.id}
+                                className={`flex items-center gap-2.5 p-2 rounded cursor-pointer transition-colors border ${
+                                  isOdabrana
+                                    ? 'bg-amber-50 border-amber-200'
+                                    : 'bg-white border-gray-200 hover:border-gray-300'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isOdabrana}
+                                  onChange={() => toggleOdabranaLekcija(r, 'KURAN', lekcija.id)}
+                                  className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500 focus:ring-1"
+                                />
+                                <span className="text-sm flex-1 text-gray-700">
+                                  {lekcija.naslov}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Save button */}
+                <div className="flex justify-end pt-4 border-t border-gray-200">
+                  <button
+                    onClick={() => setExpandedRazred(null)}
+                    className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 transition-colors"
+                  >
+                    Spremi
+                  </button>
                 </div>
-                <button
-                  onClick={() => addLekcija(r)}
-                  className="w-full px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 transition-colors font-medium text-sm"
-                >
-                  + Dodaj lekciju
-                </button>
               </div>
             )}
           </div>
