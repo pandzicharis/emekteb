@@ -57,6 +57,13 @@ function razredInfo(razred: number) {
   return { label: 'ILMIHAL 3', color: 'bg-amber-100 text-amber-800 border-amber-200' };
 }
 
+// Helper function to get avatar initials and color
+const getAvatarInfo = (ime: string, prezime: string) => {
+  const initials = `${(ime?.[0] ?? '').toUpperCase()}${(prezime?.[0] ?? '').toUpperCase()}`;
+  // Sivi avatar za sve muallime
+  return { initials, color: 'bg-gray-400 text-white' };
+};
+
 const getEndTime = (startTime: string, duration: number = 45): string => {
   const [hours, minutes] = startTime.split(':').map(Number);
   const totalMinutes = hours * 60 + minutes + duration;
@@ -1034,13 +1041,20 @@ const renderSplitControls = (razred: number, isReadOnly: boolean = false) => {
     <div className="space-y-3">
       {selectionDone && !isReadOnly && (
         <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold text-gray-700 mb-1">Podjela u grupe</div>
-            <p className="text-xs text-gray-600">
-              {splitState.enabled 
-                ? `Učenici će biti podijeljeni u dvije grupe (Grupa 1: ${groupACount}, Grupa 2: ${groupBCount})`
-                : `Svi učenici (${selectedCount}) će biti raspoređeni u jednoj grupi`}
-            </p>
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold text-gray-700 mb-1">Podjela u grupe</div>
+              <p className="text-xs text-gray-600">
+                {splitState.enabled 
+                  ? `Učenici će biti podijeljeni u dvije grupe (Grupa 1: ${groupACount}, Grupa 2: ${groupBCount})`
+                  : `Svi učenici (${selectedCount}) će biti raspoređeni u jednoj grupi`}
+              </p>
+            </div>
           </div>
           <label className={`relative inline-flex items-center flex-shrink-0 ml-4 ${!selectionDone ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
             <input
@@ -2217,33 +2231,45 @@ const renderTimelineSchedule = (
                         </div>
                         {isStepSaved(r, 1) && !isStepEditing(r, 1) && (() => {
                           const selectedMuallim = MOCK_MUALLIMI.find(m => m.id === data.korak3[r]?.muallimId);
-                          return selectedMuallim ? (
+                          if (!selectedMuallim) return null;
+                          const avatar = getAvatarInfo(selectedMuallim.ime, selectedMuallim.prezime);
+                          return (
                             <div className="mb-3 flex items-center gap-3 px-4 py-3 rounded-lg bg-green-50 border border-green-200">
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0 ${avatar.color}`}>
+                                {avatar.initials}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-bold text-green-900">{selectedMuallim.ime} {selectedMuallim.prezime}</div>
+                                <div className="text-xs text-green-700">{selectedMuallim.email}</div>
+                              </div>
                               <svg className="w-5 h-5 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                               </svg>
-                              <span className="text-sm text-green-900">
-                                <span className="font-bold">{selectedMuallim.ime} {selectedMuallim.prezime}</span>
-                              </span>
                             </div>
-                          ) : null;
+                          );
                         })()}
                         {(!isStepSaved(r, 1) || isStepEditing(r, 1)) && (
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             {MOCK_MUALLIMI.map((m) => {
                               const active = data.korak3[r]?.muallimId === m.id;
+                              const avatar = getAvatarInfo(m.ime, m.prezime);
                               return (
                                 <button
                                   key={m.id}
                                   onClick={() => setMuallim(r, m.id)}
-                                  className={`text-left p-3 rounded-lg border transition shadow-sm ${
+                                  className={`flex items-center gap-3 p-3 rounded-lg border transition shadow-sm ${
                                     active
                                       ? 'border-green-500 bg-green-50 ring-1 ring-green-200'
                                       : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow'
                                   }`}
                                 >
-                                  <div className="text-sm font-semibold text-gray-900">{m.ime} {m.prezime}</div>
-                                  <div className="text-xs text-gray-600 font-medium">{m.email}</div>
+                                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0 ${avatar.color}`}>
+                                    {avatar.initials}
+                                  </div>
+                                  <div className="flex-1 min-w-0 text-left">
+                                    <div className="text-sm font-semibold text-gray-900 truncate">{m.ime} {m.prezime}</div>
+                                    <div className="text-xs text-gray-600 font-medium truncate">{m.email}</div>
+                                  </div>
                                 </button>
                               );
                             })}
@@ -2459,7 +2485,14 @@ const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
   ) => (
     <div className="flex flex-col gap-3 p-3 border border-gray-200 rounded-lg bg-white shadow-sm h-full">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-gray-900">{label}</span>
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+            <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+          </div>
+          <span className="text-sm font-semibold text-gray-900">{label}</span>
+        </div>
       </div>
       <div className="flex items-center gap-3">
         {(['kuran', 'sufara'] as const).map((field) => (
@@ -2494,9 +2527,17 @@ const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
   return (
     <div className="p-4 mt-3 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-semibold text-gray-900">Postavke grupa</p>
-          <p className="text-xs text-gray-600">Odaberi da li grupa radi Kuran i/ili Sufaru.</p>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Postavke grupa</p>
+            <p className="text-xs text-gray-600">Odaberi da li grupa radi Kuran i/ili Sufaru.</p>
+          </div>
         </div>
       </div>
       {splitOn ? (
