@@ -7,10 +7,11 @@ import DashboardPage from './pages/DashboardPage';
 import ImportPage from './pages/ImportPage';
 import SetupNastavnaGodinaPage from './pages/SetupNastavnaGodinaPage';
 import NastavniPlanPage from './pages/NastavniPlanPage';
+import UpravljanjeLekcijamaPage from './pages/UpravljanjeLekcijamaPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function AppContent() {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { isAuthenticated, isLoading } = useAuth();
 
   const toggleSidebar = () => {
@@ -54,6 +55,7 @@ function AppContent() {
               <Route path="/import" element={<ProtectedRoute allowedRoles={['ADMIN']}><ImportPage /></ProtectedRoute>} />
               <Route path="/setup-nastavna-godina" element={<ProtectedRoute><SetupNastavnaGodinaPage /></ProtectedRoute>} />
               <Route path="/nastavni-plan" element={<ProtectedRoute><NastavniPlanPage /></ProtectedRoute>} />
+              <Route path="/lekcije" element={<ProtectedRoute><UpravljanjeLekcijamaPage /></ProtectedRoute>} />
               <Route path="/login" element={<Navigate to="/" replace />} />
             </Routes>
           </main>

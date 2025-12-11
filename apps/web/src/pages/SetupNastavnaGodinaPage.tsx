@@ -18,17 +18,14 @@ type Muallim = {
   email: string;
 };
 
-const MOCK_PLANOVI: NastavniPlan[] = [
-  { id: 'plan-1', naziv: 'Ilmihal - osnovni plan' },
-  { id: 'plan-2', naziv: 'Ilmihal - napredni plan' },
-  { id: 'plan-3', naziv: 'Kombinovani plan' },
-];
+type ApiRazred = {
+  id: string;
+  name: string;
+  ilmihal: 'ILMIHAL_I' | 'ILMIHAL_II' | 'ILMIHAL_III';
+  status: boolean;
+};
 
-const MOCK_MUALLIMI: Muallim[] = [
-  { id: 'm-1', ime: 'Amir', prezime: 'Hadžić', email: 'amir.hadzic@example.com' },
-  { id: 'm-2', ime: 'Lejla', prezime: 'Mujkić', email: 'lejla.mujkic@example.com' },
-  { id: 'm-3', ime: 'Tarik', prezime: 'Selimović', email: 'tarik.selimovic@example.com' },
-];
+const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
 
 // Fallback mock podaci ako API nije dostupan
 const FALLBACK_UCENICI: Ucenik[] = Array.from({ length: 40 }).map((_, idx) => ({
@@ -38,7 +35,6 @@ const FALLBACK_UCENICI: Ucenik[] = Array.from({ length: 40 }).map((_, idx) => ({
   email: `ucenik${idx + 1}@example.com`,
 }));
 
-const RAZREDI = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]; // 0 = predškolci
 const WEEKEND_DAYS: Schedule['day'][] = ['subota', 'nedjelja'];
 const SLOT_TIMES = ['09:00', '09:45', '10:30', '11:15', '12:00', '12:45', '13:30', '14:15'];
 
@@ -50,8 +46,13 @@ const SLOT_DURATION_OPTIONS = [30, 45, 60, 90, 120]; // minutes
 
 const labelGrupa = (razred: number) => (razred === 0 ? 'Predškolci' : `${razred}. razred`);
 
-function razredInfo(razred: number) {
+function razredInfo(razred: number, ilmihal?: ApiRazred['ilmihal']) {
   if (razred === 0) return { label: 'PREDSKOLCI', color: 'bg-teal-100 text-teal-800 border-teal-200' };
+
+  if (ilmihal === 'ILMIHAL_I') return { label: 'ILMIHAL I', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+  if (ilmihal === 'ILMIHAL_II') return { label: 'ILMIHAL II', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
+  if (ilmihal === 'ILMIHAL_III') return { label: 'ILMIHAL III', color: 'bg-amber-100 text-amber-800 border-amber-200' };
+
   if (razred <= 3) return { label: 'ILMIHAL 1', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
   if (razred <= 6) return { label: 'ILMIHAL 2', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
   return { label: 'ILMIHAL 3', color: 'bg-amber-100 text-amber-800 border-amber-200' };
@@ -132,6 +133,7 @@ type StepData = {
   korak3: {
     // po razredu
     [razred: number]: {
+      razredId: string;
       muallimId: string | null;
       ucenici: string[]; // ako split nije uključen
       split: SplitState;
@@ -162,11 +164,24 @@ export default function SetupNastavnaGodinaPage() {
   const [editingSteps, setEditingSteps] = useState<Record<number, Set<number>>>({});
   const [ucenici, setUcenici] = useState<Ucenik[]>([]);
   const [timelineHover, setTimelineHover] = useState<Record<string, { position: number; day: Schedule['day'] }>>({});
+  const [razredi, setRazredi] = useState<ApiRazred[]>([]);
+  const [loadingRazredi, setLoadingRazredi] = useState(false);
+  const [razrediError, setRazrediError] = useState<string | null>(null);
+  const [plans, setPlans] = useState<NastavniPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [plansError, setPlansError] = useState<string | null>(null);
+  const [muallimi, setMuallimi] = useState<Muallim[]>([]);
+  const [muallimiLoading, setMuallimiLoading] = useState(false);
+  const [muallimiError, setMuallimiError] = useState<string | null>(null);
+  const [planCapabilities, setPlanCapabilities] = useState<Record<number, { kuran: boolean; sufara: boolean }>>({});
+  const [planDetailsLoading, setPlanDetailsLoading] = useState(false);
+  const [planDetailsError, setPlanDetailsError] = useState<string | null>(null);
+  const [planRazredIds, setPlanRazredIds] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchUcenici = async () => {
       try {
-        const response = await axios.get<Ucenik[]>('http://localhost:3000/ucenici', {
+        const response = await axios.get<Ucenik[]>(`${API_URL}/ucenici`, {
           timeout: 5000, // 5 sekundi timeout
         });
         if (response.data && response.data.length > 0) {
@@ -184,6 +199,70 @@ export default function SetupNastavnaGodinaPage() {
     };
 
     fetchUcenici();
+  }, []);
+
+  useEffect(() => {
+    const fetchMuallimi = async () => {
+      setMuallimiLoading(true);
+      setMuallimiError(null);
+      try {
+        const response = await axios.get<Muallim[]>(`${API_URL}/muallimi`, { timeout: 5000 });
+        setMuallimi(response.data ?? []);
+      } catch (error) {
+        console.warn('API nije dostupan za muallime:', error);
+        setMuallimi([]);
+        setMuallimiError('Nisam uspio dohvatiti muallime.');
+      } finally {
+        setMuallimiLoading(false);
+      }
+    };
+
+    fetchMuallimi();
+  }, []);
+
+  useEffect(() => {
+    const fetchPlans = async () => {
+      setPlansLoading(true);
+      setPlansError(null);
+      try {
+        const response = await axios.get<NastavniPlan[]>(`${API_URL}/nastavni-plan`, { timeout: 5000 });
+        const fetched = response.data ?? [];
+        setPlans(fetched);
+        if (fetched.length > 0) {
+          setData((prev) => ({
+            ...prev,
+            korak1: { ...prev.korak1, planId: prev.korak1.planId || fetched[0].id },
+          }));
+        }
+      } catch (error) {
+        console.warn('API nije dostupan za nastavne planove:', error);
+        setPlans([]);
+        setPlansError('Nisam uspio dohvatiti nastavne planove.');
+      } finally {
+        setPlansLoading(false);
+      }
+    };
+
+    fetchPlans();
+  }, []);
+
+  useEffect(() => {
+    const fetchRazredi = async () => {
+      setLoadingRazredi(true);
+      setRazrediError(null);
+      try {
+        const response = await axios.get<ApiRazred[]>(`${API_URL}/razredi`, { timeout: 5000 });
+        setRazredi(response.data ?? []);
+      } catch (error) {
+        console.warn('API nije dostupan za razrede:', error);
+        setRazredi([]);
+        setRazrediError('Nisam uspio dohvatiti razrede.');
+      } finally {
+        setLoadingRazredi(false);
+      }
+    };
+
+    fetchRazredi();
   }, []);
 
   const setActiveRazredStep = (razred: number, nextStep: number) => {
@@ -272,7 +351,8 @@ export default function SetupNastavnaGodinaPage() {
     return active === stepNum || (saved && editing);
   };
 
-  const defaultRazredState = () => ({
+  const defaultRazredState = (razredId: string = '') => ({
+    razredId,
     muallimId: null as string | null,
     ucenici: [] as string[],
     split: { enabled: false, groupA: [] as string[], groupB: [] as string[], selectionDone: false },
@@ -288,7 +368,7 @@ export default function SetupNastavnaGodinaPage() {
       opis: 'Postavi raspored, razrede i grupe za novu školsku godinu.',
       periodOd: '2025-09-01',
       periodDo: '2026-06-10',
-      planId: MOCK_PLANOVI[0].id,
+      planId: '',
       status: 'ACTIVE',
     },
     korak2: {
@@ -296,6 +376,94 @@ export default function SetupNastavnaGodinaPage() {
     },
     korak3: {},
   });
+
+  const razrediOptions = useMemo(
+    () =>
+      (razredi ?? [])
+        .filter((r) => r.status !== false)
+        .map((r) => {
+          const match = r.name.match(/\d+/);
+          const nameNum = match ? Number(match[0]) : NaN;
+          return { ...r, nameNum };
+        })
+        .filter((r) => !Number.isNaN(r.nameNum)),
+    [razredi],
+  );
+
+  const razredByNumber = useMemo(() => {
+    const map = new Map<number, (typeof razrediOptions)[number]>();
+    razrediOptions.forEach((r) => map.set(r.nameNum, r));
+    return map;
+  }, [razrediOptions]);
+
+  const getRazredId = (razred: number): string => {
+    const razredInfo = razredByNumber.get(razred);
+    return razredInfo?.id ?? '';
+  };
+
+  const planRazredOptions = useMemo(() => {
+    if (planRazredIds.length === 0) return razrediOptions;
+    const allowedIds = new Set(planRazredIds);
+    return razrediOptions.filter((r) => allowedIds.has(r.id));
+  }, [planRazredIds, razrediOptions]);
+
+  const muallimById = useMemo(() => {
+    const map = new Map<string, Muallim>();
+    muallimi.forEach((m) => map.set(m.id, m));
+    return map;
+  }, [muallimi]);
+
+  useEffect(() => {
+    const fetchPlanDetails = async () => {
+      const planId = data.korak1.planId;
+      if (!planId || razrediOptions.length === 0) {
+        setPlanCapabilities({});
+        return;
+      }
+      setPlanDetailsLoading(true);
+      setPlanDetailsError(null);
+      try {
+        const response = await axios.get(`${API_URL}/nastavni-plan/${planId}`, { timeout: 8000 });
+        const lekcije = response.data?.lekcije ?? {};
+        const planRazredi: string[] = response.data?.razredi ?? [];
+        setPlanRazredIds(planRazredi);
+        const caps: Record<number, { kuran: boolean; sufara: boolean }> = {};
+        razrediOptions.forEach((r) => {
+          const entry = lekcije[r.id];
+          const hasKuran = !!(entry?.KURAN && entry.KURAN.length > 0);
+          const hasSufara = !!(entry?.SUFARA && entry.SUFARA.length > 0);
+          caps[r.nameNum] = { kuran: hasKuran, sufara: hasSufara };
+        });
+        setPlanCapabilities(caps);
+      } catch (error) {
+        console.warn('Neuspješno dohvaćanje detalja nastavnog plana', error);
+        setPlanCapabilities({});
+        setPlanRazredIds([]);
+        setPlanDetailsError('Nisam uspio dohvatiti detalje plana.');
+      } finally {
+        setPlanDetailsLoading(false);
+      }
+    };
+
+    fetchPlanDetails();
+  }, [data.korak1.planId, razrediOptions, API_URL]);
+
+  useEffect(() => {
+    // Očisti odabir razreda koji nisu u planu
+    setData((prev) => {
+      const allowedNums = new Set(planRazredOptions.map((r) => r.nameNum));
+      const filtered = prev.korak2.razredi.filter((num) => allowedNums.has(num));
+      return filtered.length === prev.korak2.razredi.length
+        ? prev
+        : {
+            ...prev,
+            korak2: { razredi: filtered },
+            korak3: Object.fromEntries(
+              Object.entries(prev.korak3).filter(([key]) => allowedNums.has(Number(key))),
+            ),
+          };
+    });
+  }, [planRazredOptions]);
 
   const filteredUcenici = useMemo(() => {
     if (!search) return ucenici;
@@ -364,6 +532,7 @@ export default function SetupNastavnaGodinaPage() {
 
       return {
         razred: r,
+        razredId: entry?.razredId ?? razredByNumber.get(r)?.id ?? '',
         muallimId: entry?.muallimId ?? null,
         split: entry?.split?.enabled ?? false,
         ucenici: uceniciObj,
@@ -385,7 +554,7 @@ export default function SetupNastavnaGodinaPage() {
       },
       razredi: koraci,
     };
-  }, [data]);
+  }, [data, razredByNumber]);
 
   type OccupiedSlotInfo = {
     razred: number;
@@ -445,7 +614,15 @@ export default function SetupNastavnaGodinaPage() {
 
       // Ako ga brišemo, ukloni i podatke iz korak3
       const korak3 = { ...prev.korak3 };
-      if (exists) delete korak3[r];
+      if (exists) {
+        delete korak3[r];
+      } else {
+        // Kada dodajemo razred, dohvati njegov ID iz baze
+        const razredInfo = razredByNumber.get(r);
+        if (razredInfo) {
+          korak3[r] = defaultRazredState(razredInfo.id);
+        }
+      }
 
       return {
         ...prev,
@@ -458,7 +635,7 @@ export default function SetupNastavnaGodinaPage() {
   const setRazredUcenici = (razred: number, ucenici: string[]) => {
     // Umjesto spremanja u ucenici, sprema u groupA
     setData((prev) => {
-      const current = prev.korak3[razred] ?? defaultRazredState();
+      const current = prev.korak3[razred] ?? defaultRazredState(getRazredId(razred));
       return {
         ...prev,
         korak3: {
@@ -483,7 +660,7 @@ export default function SetupNastavnaGodinaPage() {
     partial: Partial<Schedule>,
   ) => {
     setData((prev) => {
-      const current = prev.korak3[razred] ?? defaultRazredState();
+      const current = prev.korak3[razred] ?? defaultRazredState(getRazredId(razred));
       const raspored = { ...current.raspored };
       const base =
         (target === 'single' ? raspored.single : target === 'groupA' ? raspored.groupA : raspored.groupB) ??
@@ -517,7 +694,7 @@ export default function SetupNastavnaGodinaPage() {
 
   const setMuallim = (razred: number, muallimId: string) => {
     setData((prev) => {
-      const current = prev.korak3[razred] ?? defaultRazredState();
+      const current = prev.korak3[razred] ?? defaultRazredState(getRazredId(razred));
       return {
         ...prev,
         korak3: {
@@ -535,7 +712,7 @@ export default function SetupNastavnaGodinaPage() {
 
   const setSplit = (razred: number, enabled: boolean) => {
     setData((prev) => {
-      const current = prev.korak3[razred] ?? defaultRazredState();
+      const current = prev.korak3[razred] ?? defaultRazredState(getRazredId(razred));
       // Nova logika:
       // - enable: svi učenici iz groupA ostaju, groupB prazna
       // - disable: spoji groupA+B nazad u groupA, groupB prazna
@@ -630,7 +807,7 @@ export default function SetupNastavnaGodinaPage() {
 
   const setGroupSetting = (razred: number, target: 'single' | 'groupA' | 'groupB', field: 'kuran' | 'sufara') => {
     setData((prev) => {
-      const current = prev.korak3[razred] ?? defaultRazredState();
+      const current = prev.korak3[razred] ?? defaultRazredState(getRazredId(razred));
       const settings = current.settings ? { ...current.settings } : {};
       const base = { kuran: false, sufara: false };
 
@@ -748,14 +925,19 @@ export default function SetupNastavnaGodinaPage() {
                 korak1: { ...prev.korak1, planId: e.target.value },
               }))
             }
+            disabled={plansLoading || plans.length === 0}
             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-50"
           >
-            {MOCK_PLANOVI.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.naziv}
-              </option>
-            ))}
+            {plansLoading && <option>Učitavam planove...</option>}
+            {!plansLoading && plans.length === 0 && <option>Nema dostupnih planova</option>}
+            {!plansLoading &&
+              plans.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.naziv}
+                </option>
+              ))}
           </select>
+          {plansError && <p className="mt-1 text-xs text-red-600">{plansError}</p>}
         </div>
       </div>
 
@@ -843,12 +1025,23 @@ export default function SetupNastavnaGodinaPage() {
       <div className="flex items-center gap-3 justify-end">
         <button
           onClick={() =>
-            setData((prev) => ({
-              ...prev,
-              korak2: { razredi: [...RAZREDI] },
-              korak3: {},
-            }))
+            setData((prev) => {
+              const razrediNums = planRazredOptions.map((r) => r.nameNum);
+              const korak3: StepData['korak3'] = {};
+              razrediNums.forEach((num) => {
+                const razredInfo = razredByNumber.get(num);
+                if (razredInfo) {
+                  korak3[num] = defaultRazredState(razredInfo.id);
+                }
+              });
+              return {
+                ...prev,
+                korak2: { razredi: razrediNums },
+                korak3,
+              };
+            })
           }
+          disabled={loadingRazredi || planRazredOptions.length === 0}
           className="px-4 py-2 rounded-lg border border-green-300 text-green-700 bg-green-50 hover:bg-green-100 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Odaberi sve razrede
@@ -866,34 +1059,47 @@ export default function SetupNastavnaGodinaPage() {
           Očisti odabir
         </button>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        {RAZREDI.map((r) => {
-          const active = data.korak2.razredi.includes(r);
-          const info = razredInfo(r);
-          return (
-            <div
-              key={r}
-              role="button"
-              tabIndex={0}
-              onClick={() => toggleRazred(r)}
-              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleRazred(r)}
-              className={`p-4 rounded-xl border shadow-sm transition transform hover:-translate-y-0.5 cursor-pointer ${
-                active ? 'border-green-500 bg-green-50 ring-1 ring-green-200' : 'border-gray-200 bg-white hover:border-green-300'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="text-xs text-gray-500 font-medium">Razred</div>
-                  <div className="text-lg font-bold text-gray-900">{labelGrupa(r)}</div>
+      {razrediError && (
+        <div className="px-4 py-3 rounded-lg border border-red-200 bg-red-50 text-sm text-red-800">
+          {razrediError}
+        </div>
+      )}
+      {loadingRazredi || planDetailsLoading ? (
+        <div className="flex items-center justify-center text-sm text-gray-600">Učitavam razrede...</div>
+      ) : planRazredOptions.length === 0 ? (
+        <div className="px-4 py-3 rounded-lg border border-gray-200 bg-white text-sm text-gray-700">
+          Odabrani nastavni plan nema vezane razrede.
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          {planRazredOptions.map((razred) => {
+            const active = data.korak2.razredi.includes(razred.nameNum);
+            const info = razredInfo(razred.nameNum, razred.ilmihal);
+            return (
+              <div
+                key={razred.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => toggleRazred(razred.nameNum)}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleRazred(razred.nameNum)}
+                className={`p-4 rounded-xl border shadow-sm transition transform hover:-translate-y-0.5 cursor-pointer ${
+                  active ? 'border-green-500 bg-green-50 ring-1 ring-green-200' : 'border-gray-200 bg-white hover:border-green-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-xs text-gray-500 font-medium">Razred</div>
+                    <div className="text-lg font-bold text-gray-900">{labelGrupa(razred.nameNum)}</div>
+                  </div>
+                </div>
+                <div className={`inline-flex text-xs px-3 py-1 rounded-full border font-semibold ${info.color}`}>
+                  {info.label}
                 </div>
               </div>
-              <div className={`inline-flex text-xs px-3 py-1 rounded-full border font-semibold ${info.color}`}>
-                {info.label}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 
@@ -913,7 +1119,7 @@ export default function SetupNastavnaGodinaPage() {
     const finalizeSelection = () => {
       const selectedArr = Array.from(selected);
       setData((prev) => {
-        const current = prev.korak3[razred] ?? defaultRazredState();
+        const current = prev.korak3[razred] ?? defaultRazredState(getRazredId(razred));
 
         // Uvijek koristimo groupA kao glavnu grupu
         // Ako je split uključen: zadrži postojeće grupe ali uskladi sa novim odabirom
@@ -1188,9 +1394,9 @@ const renderSplitControls = (razred: number, isReadOnly: boolean = false) => {
       if (!filter) return true;
       // Kada filter dolazi iz switcha, matchamo po ID; ako ikad bude custom teksta, fallback na ime/prezime
       const muallimId = data.korak3[slot.razred]?.muallimId;
-      const muallim = muallimId ? MOCK_MUALLIMI.find((m) => m.id === muallimId) : undefined;
+      const muallim = muallimId ? muallimById.get(muallimId) : undefined;
       if (!muallim) return false;
-      if (MOCK_MUALLIMI.some((m) => m.id === occupiedFilter)) {
+      if (muallimi.some((m) => m.id === occupiedFilter)) {
         return muallim.id === occupiedFilter;
       }
       const full = `${muallim.ime} ${muallim.prezime}`.toLowerCase();
@@ -1200,7 +1406,7 @@ const renderSplitControls = (razred: number, isReadOnly: boolean = false) => {
     const renderSlotRow = (slot: OccupiedSlotInfo) => {
       const active = highlightRazred === slot.razred;
       const muallimId = data.korak3[slot.razred]?.muallimId;
-      const muallim = muallimId ? MOCK_MUALLIMI.find((m) => m.id === muallimId) : undefined;
+      const muallim = muallimId ? muallimById.get(muallimId) : undefined;
       const entrySettings = data.korak3[slot.razred]?.settings;
       const formatProgram = (s?: { kuran?: boolean; sufara?: boolean }) => {
         if (!s) return '';
@@ -1264,7 +1470,7 @@ const renderSplitControls = (razred: number, isReadOnly: boolean = false) => {
             )}
           </div>
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            {[{ id: '', label: 'Svi' }, ...MOCK_MUALLIMI.map((m) => ({ id: m.id, label: `${m.ime} ${m.prezime}`, initials: `${m.ime[0] ?? ''}${m.prezime[0] ?? ''}`.toUpperCase() })) as { id: string; label: string; initials?: string }[]].flat().map((m) => {
+            {[{ id: '', label: 'Svi' }, ...muallimi.map((m) => ({ id: m.id, label: `${m.ime} ${m.prezime}`, initials: `${m.ime?.[0] ?? ''}${m.prezime?.[0] ?? ''}`.toUpperCase() })) as { id: string; label: string; initials?: string }[]].flat().map((m) => {
               const active = occupiedFilter === m.id;
               const hasAvatar = !!m.id;
               const initials = hasAvatar ? m.initials ?? '' : '';
@@ -1334,7 +1540,7 @@ const renderTimelineSchedule = (
   setTimelineHover: React.Dispatch<React.SetStateAction<Record<string, { position: number; day: Schedule['day'] }>>> = () => {},
   isStep4Saved: boolean = false,
 ) => {
-  const entry = data.korak3[razred] ?? defaultRazredState();
+  const entry = data.korak3[razred] ?? defaultRazredState(getRazredId(razred));
   const schedule =
     target === 'single'
       ? entry.raspored.single
@@ -1961,7 +2167,7 @@ const renderTimelineSchedule = (
 };
 
   const renderRaspored = (razred: number, isReadOnly: boolean = false) => {
-    const entry = data.korak3[razred] ?? defaultRazredState();
+    const entry = data.korak3[razred] ?? defaultRazredState(getRazredId(razred));
     const splitOn = entry.split.enabled;
     // Ready ako su koraci 1 i 2 saved (muallim i učenici)
     const ready = isStepSaved(razred, 1) && isStepSaved(razred, 2);
@@ -2099,7 +2305,8 @@ const renderTimelineSchedule = (
                 )}
                 <span className="text-base font-semibold text-gray-900">{labelGrupa(r)}</span>
                 {(() => {
-                  const info = razredInfo(r);
+                  const meta = razredByNumber.get(r);
+                  const info = razredInfo(r, meta?.ilmihal);
                   return (
                     <span className={`text-xs px-2 py-1 rounded border font-semibold ${info.color}`}>
                       {info.label}
@@ -2123,7 +2330,7 @@ const renderTimelineSchedule = (
                 <div className="space-y-2">
                   {(() => {
                     const entry = data.korak3[r];
-                    const selectedMuallim = MOCK_MUALLIMI.find(m => m.id === entry?.muallimId);
+                    const selectedMuallim = entry?.muallimId ? muallimById.get(entry.muallimId) : undefined;
                     const splitOn = entry?.split?.enabled;
                     const settings = entry?.settings;
                     const renderBadges = (key: 'single' | 'groupA' | 'groupB') => {
@@ -2230,7 +2437,7 @@ const renderTimelineSchedule = (
                           ) : null}
                         </div>
                         {isStepSaved(r, 1) && !isStepEditing(r, 1) && (() => {
-                          const selectedMuallim = MOCK_MUALLIMI.find(m => m.id === data.korak3[r]?.muallimId);
+                          const selectedMuallim = muallimById.get(data.korak3[r]?.muallimId ?? '');
                           if (!selectedMuallim) return null;
                           const avatar = getAvatarInfo(selectedMuallim.ime, selectedMuallim.prezime);
                           return (
@@ -2249,31 +2456,42 @@ const renderTimelineSchedule = (
                           );
                         })()}
                         {(!isStepSaved(r, 1) || isStepEditing(r, 1)) && (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            {MOCK_MUALLIMI.map((m) => {
-                              const active = data.korak3[r]?.muallimId === m.id;
-                              const avatar = getAvatarInfo(m.ime, m.prezime);
-                              return (
-                                <button
-                                  key={m.id}
-                                  onClick={() => setMuallim(r, m.id)}
-                                  className={`flex items-center gap-3 p-3 rounded-lg border transition shadow-sm ${
-                                    active
-                                      ? 'border-green-500 bg-green-50 ring-1 ring-green-200'
-                                      : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow'
-                                  }`}
-                                >
-                                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0 ${avatar.color}`}>
-                                    {avatar.initials}
-                                  </div>
-                                  <div className="flex-1 min-w-0 text-left">
-                                    <div className="text-sm font-semibold text-gray-900 truncate">{m.ime} {m.prezime}</div>
-                                    <div className="text-xs text-gray-600 font-medium truncate">{m.email}</div>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
+                          <>
+                            {muallimiLoading && (
+                              <div className="text-sm text-gray-600">Učitavam muallime...</div>
+                            )}
+                            {muallimiError && !muallimiLoading && (
+                              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{muallimiError}</div>
+                            )}
+                            {!muallimiLoading && muallimi.length === 0 && !muallimiError && (
+                              <div className="text-sm text-gray-600">Nema dostupnih muallima.</div>
+                            )}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              {muallimi.map((m) => {
+                                const active = data.korak3[r]?.muallimId === m.id;
+                                const avatar = getAvatarInfo(m.ime, m.prezime);
+                                return (
+                                  <button
+                                    key={m.id}
+                                    onClick={() => setMuallim(r, m.id)}
+                                    className={`flex items-center gap-3 p-3 rounded-lg border transition shadow-sm ${
+                                      active
+                                        ? 'border-green-500 bg-green-50 ring-1 ring-green-200'
+                                        : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow'
+                                    }`}
+                                  >
+                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0 ${avatar.color}`}>
+                                      {avatar.initials}
+                                    </div>
+                                    <div className="flex-1 min-w-0 text-left">
+                                      <div className="text-sm font-semibold text-gray-900 truncate">{m.ime} {m.prezime}</div>
+                                      <div className="text-xs text-gray-600 font-medium truncate">{m.email}</div>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
                         )}
                         {isStepEditing(r, 1) && (
                           <div className="flex flex-row items-center justify-end gap-2 mt-3">
@@ -2473,7 +2691,7 @@ const renderTimelineSchedule = (
   );
 
 const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
-  const entry = data.korak3[razred] ?? defaultRazredState();
+  const entry = data.korak3[razred] ?? defaultRazredState(getRazredId(razred));
   const splitOn = entry.split.enabled;
   const settings = entry.settings ?? { single: { kuran: false, sufara: false } };
   const base = { kuran: false, sufara: false };
@@ -2482,47 +2700,64 @@ const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
     label: string,
     target: 'single' | 'groupA' | 'groupB',
     state: { kuran: boolean; sufara: boolean },
-  ) => (
-    <div className="flex flex-col gap-3 p-3 border border-gray-200 rounded-lg bg-white shadow-sm h-full">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-            </svg>
+  ) => {
+    const allowedFields: Array<'kuran' | 'sufara'> = [];
+    const caps = planCapabilities[razred];
+    if (!caps || caps.kuran || caps.sufara) {
+      if (caps?.kuran ?? true) allowedFields.push('kuran');
+      if (caps?.sufara ?? true) allowedFields.push('sufara');
+    }
+
+    if (allowedFields.length === 0) {
+      return (
+        <div className="flex flex-col gap-3 p-3 border border-gray-200 rounded-lg bg-white shadow-sm h-full">
+          <div className="text-sm text-gray-600">Nema Kuran/Sufara postavki za ovaj razred u odabranom planu.</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col gap-3 p-3 border border-gray-200 rounded-lg bg-white shadow-sm h-full">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+              <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            </div>
+            <span className="text-sm font-semibold text-gray-900">{label}</span>
           </div>
-          <span className="text-sm font-semibold text-gray-900">{label}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          {allowedFields.map((field) => (
+            <label key={field} className="inline-flex items-center gap-2 text-sm font-medium text-gray-800">
+              <span className="capitalize">{field === 'kuran' ? 'Kuran' : 'Sufara'}</span>
+              <div className="relative inline-flex items-center">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={state[field]}
+                  disabled={isReadOnly}
+                  onChange={() => setGroupSetting(razred, target, field)}
+                />
+                <div
+                  className={`w-10 h-5 rounded-full transition-colors ${
+                    state[field] ? 'bg-emerald-500' : 'bg-gray-300'
+                  } ${isReadOnly ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  <div
+                    className={`absolute top-[2px] left-[2px] h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                      state[field] ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </div>
+              </div>
+            </label>
+          ))}
         </div>
       </div>
-      <div className="flex items-center gap-3">
-        {(['kuran', 'sufara'] as const).map((field) => (
-          <label key={field} className="inline-flex items-center gap-2 text-sm font-medium text-gray-800">
-            <span className="capitalize">{field === 'kuran' ? 'Kuran' : 'Sufara'}</span>
-            <div className="relative inline-flex items-center">
-              <input
-                type="checkbox"
-                className="sr-only peer"
-                checked={state[field]}
-                disabled={isReadOnly}
-                onChange={() => setGroupSetting(razred, target, field)}
-              />
-              <div
-                className={`w-10 h-5 rounded-full transition-colors ${
-                  state[field] ? 'bg-emerald-500' : 'bg-gray-300'
-                } ${isReadOnly ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <div
-                  className={`absolute top-[2px] left-[2px] h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                    state[field] ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </div>
-            </div>
-          </label>
-        ))}
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="p-4 mt-3 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
@@ -2536,9 +2771,17 @@ const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
           </div>
           <div>
             <p className="text-sm font-semibold text-gray-900">Postavke grupa</p>
-            <p className="text-xs text-gray-600">Odaberi da li grupa radi Kuran i/ili Sufaru.</p>
+            <p className="text-xs text-gray-600">
+              Vidljive opcije zavise od odabranog nastavnog plana za ovaj razred.
+            </p>
           </div>
         </div>
+        {planDetailsLoading && (
+          <span className="text-xs text-gray-500">Učitavam postavke plana...</span>
+        )}
+        {planDetailsError && (
+          <span className="text-xs text-red-600">{planDetailsError}</span>
+        )}
       </div>
       {splitOn ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -2559,7 +2802,7 @@ const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
       <div className="w-full max-w-none mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Setup nastavne godine</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Nastavna godina</h1>
             <p className="text-sm text-gray-600 mt-1">
               Korak-po-korak: osnovni podaci → odabir razreda → dodjela učenika (sa opcijom split).
             </p>

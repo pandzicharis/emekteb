@@ -229,5 +229,86 @@ model Razred {
     ilmihal Ilmihal
     status  Boolean @default(true)
 
+    lekcije         RazredLekcija[]
+    nastavniPlanovi NastavniPlanRazred[]
+
     @@map("razredi")
+}
+
+enum TipLekcije {
+    ILMIHAL
+    KURAN
+    SUFARA
+}
+
+model Lekcija {
+    id         String     @id @default(uuid())
+    naslov     String
+    opis       String
+    tezina     Int
+    redoslijed Int
+    aktivan    Boolean    @default(true)
+    tip        TipLekcije
+    kreiran    DateTime   @default(now())
+    azuriran   DateTime   @updatedAt
+
+    razredi          RazredLekcija[]
+    nastavnihPlanova NastavniPlanRazredLekcija[]
+
+    @@map("lekcije")
+}
+
+model RazredLekcija {
+    id        String @id @default(uuid())
+    razredId  String
+    lekcijaId String
+
+    razred  Razred  @relation(fields: [razredId], references: [id], onDelete: Cascade)
+    lekcija Lekcija @relation(fields: [lekcijaId], references: [id], onDelete: Cascade)
+
+    @@unique([razredId, lekcijaId])
+    @@map("razred_lekcije")
+}
+
+// ============================================
+// NASTAVNI PLANOVI
+// ============================================
+
+model NastavniPlan {
+    id             String   @id @default(uuid())
+    naziv          String
+    opis           String
+    datumUsvajanja DateTime
+    aktivan        Boolean  @default(true)
+    kreiran        DateTime @default(now())
+    azuriran       DateTime @updatedAt
+
+    razredi NastavniPlanRazred[]
+
+    @@map("nastavni_planovi")
+}
+
+model NastavniPlanRazred {
+    id             String @id @default(uuid())
+    nastavniPlanId String
+    razredId       String
+
+    nastavniPlan NastavniPlan                @relation(fields: [nastavniPlanId], references: [id], onDelete: Cascade)
+    razred       Razred                      @relation(fields: [razredId], references: [id], onDelete: Cascade)
+    lekcije      NastavniPlanRazredLekcija[]
+
+    @@unique([nastavniPlanId, razredId])
+    @@map("nastavni_plan_razredi")
+}
+
+model NastavniPlanRazredLekcija {
+    id                   String @id @default(uuid())
+    nastavniPlanRazredId String
+    lekcijaId            String
+
+    nastavniPlanRazred NastavniPlanRazred @relation(fields: [nastavniPlanRazredId], references: [id], onDelete: Cascade)
+    lekcija            Lekcija            @relation(fields: [lekcijaId], references: [id], onDelete: Cascade)
+
+    @@unique([nastavniPlanRazredId, lekcijaId])
+    @@map("nastavni_plan_razred_lekcije")
 }

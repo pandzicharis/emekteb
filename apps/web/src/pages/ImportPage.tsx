@@ -69,12 +69,20 @@ export default function ImportPage() {
   };
 
   return (
-    <div className="bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-3xl mx-auto">
-        <div className="bg-white shadow-lg rounded-lg p-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-8">
-            Import Učenika iz CSV
-          </h1>
+    <div className="bg-gray-50 min-h-full p-6 lg:p-10">
+      <div className="w-full space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Import učenika (CSV)</h1>
+            <p className="text-sm text-gray-600 mt-1">Uvezite učenike iz CSV fajla i pregledajte rezultat.</p>
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-200 shadow-sm rounded-xl p-6 lg:p-8 space-y-6">
+          <div className="space-y-2">
+            <h2 className="text-lg font-semibold text-gray-900">CSV fajl</h2>
+            <p className="text-sm text-gray-600">Odaberite CSV fajl i pokrenite import.</p>
+          </div>
 
           {/* File Upload */}
           <div className="mb-6">
@@ -105,7 +113,7 @@ export default function ImportPage() {
           <button
             onClick={handleUpload}
             disabled={!file || uploading}
-            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             {uploading ? (
               <>
