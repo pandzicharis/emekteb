@@ -315,27 +315,6 @@ export default function MuallimiPage() {
     console.log('✅ Photo uploaded successfully');
   };
 
-  const handleDelete = async () => {
-    if (!selectedMuallim || !confirm('Da li ste sigurni da želite obrisati ovog muallima?')) {
-      return;
-    }
-
-    try {
-      setSaving(true);
-      const token = localStorage.getItem('token');
-      await axios.delete(`${API_URL}/muallimi/${selectedMuallim.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      setSelectedMuallim(null);
-      setIsCreating(false);
-      await fetchMuallimi();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Greška pri brisanju');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const getInitials = (muallim: Muallim) => {
     const ime = muallim.ime?.charAt(0).toUpperCase() || '';
@@ -490,7 +469,7 @@ export default function MuallimiPage() {
                 </label>
                 
                 {!isCropping ? (
-                  <div className="flex flex-col items-center gap-4">
+                  <div className="flex flex-col items-center justify-center gap-4">
                     <div className="relative">
                       {photoPreview ? (
                         <div className="relative">
@@ -539,10 +518,10 @@ export default function MuallimiPage() {
                     <p className="text-xs text-gray-500 text-center">JPEG, PNG ili WebP (max 5MB)</p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-4 flex flex-col items-center">
                     <div 
                       ref={containerRef}
-                      className="relative bg-gray-900 rounded-lg overflow-hidden cursor-move flex items-center justify-center" 
+                      className="relative bg-gray-900 rounded-lg overflow-hidden cursor-move flex items-center justify-center mx-auto" 
                       style={{ aspectRatio: '1/1', maxHeight: '400px' }}
                       onMouseDown={(e) => {
                         if (!imageRef.current || !cropData) return;
@@ -681,27 +660,29 @@ export default function MuallimiPage() {
                       )}
                     </div>
                     <canvas ref={canvasRef} className="hidden" />
-                    <div className="flex gap-3 justify-center">
-                      <button
-                        onClick={handleCrop}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        Potvrdi
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsCropping(false);
-                          setCropData(null);
-                          setPhotoPreview(null);
-                          setPhotoFile(null);
-                        }}
-                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
-                      >
-                        Odustani
-                      </button>
+                    <div className="flex gap-3 justify-center items-center">
+                      <div className="flex gap-3 w-full max-w-md">
+                        <button
+                          onClick={handleCrop}
+                          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          Potvrdi
+                        </button>
+                        <button
+                          onClick={() => {
+                            setIsCropping(false);
+                            setCropData(null);
+                            setPhotoPreview(null);
+                            setPhotoFile(null);
+                          }}
+                          className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+                        >
+                          Odustani
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -776,7 +757,7 @@ export default function MuallimiPage() {
                     {!isCreating && <span className="text-xs text-gray-500 font-normal ml-2">(ostavite prazno da se generiše novi)</span>}
                   </label>
                   <input
-                    type="text"
+                    type="password"
                     name="pin"
                     value={formData.pin}
                     onChange={handleInputChange}
@@ -824,20 +805,8 @@ export default function MuallimiPage() {
             </div>
 
             {/* Footer Actions */}
-            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
-              {!isCreating && selectedMuallim && (
-                <button
-                  onClick={handleDelete}
-                  disabled={saving}
-                  className="p-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                  title="Obriši muallima"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
-              )}
-              <div className="flex gap-3 ml-auto">
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-3">
+              <div className="flex gap-3">
                 <button
                   onClick={() => {
                     setSelectedMuallim(null);

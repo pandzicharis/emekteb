@@ -204,25 +204,34 @@ export default function LoginPage() {
     try {
       if (!selectedUser || !selectedUser.id) {
         setError('Korisnik nije odabran');
+        setIsLoading(false);
         return;
       }
       console.log('🔑 Attempting PIN login:', { pin: pinInput, userId: selectedUser.id, user: selectedUser });
       await loginWithPin(pinInput, selectedUser.id);
+      // Samo zatvori modal ako je login uspješan
       setShowPinModal(false);
       setPinInput('');
       setSelectedUser(null);
       navigate('/');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Neispravan PIN');
-      setPinInput(''); // Reset PIN input on error
-    } finally {
+      let errorMessage = 'Neispravan PIN';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (axios.isAxiosError(err)) {
+        errorMessage = err.response?.data?.message || 'Neispravan PIN';
+      }
+      setError(errorMessage);
+      // Ne resetuj PIN input - ostavi ga da korisnik vidi šta je unio i pokuša ponovo
+      // Modal ostaje otvoren
       setIsLoading(false);
     }
   }, [selectedUser, pinInput, loginWithPin, navigate]);
 
   // Automatski šalji zahtjev kada se unese PIN (4-6 cifara)
+  // Ne pokreći automatsko slanje ako postoji greška (da korisnik može vidjeti grešku i pokušati ponovo)
   useEffect(() => {
-    if (showPinModal && pinInput.length >= 4 && pinInput.length <= 6 && !isLoading && selectedUser) {
+    if (showPinModal && pinInput.length >= 4 && pinInput.length <= 6 && !isLoading && selectedUser && !error) {
       const timer = setTimeout(() => {
         performPinLogin();
       }, 500); // Mala pauza da korisnik završi unos
@@ -230,7 +239,7 @@ export default function LoginPage() {
       return () => clearTimeout(timer);
     }
     return undefined;
-  }, [pinInput, showPinModal, isLoading, selectedUser, performPinLogin]);
+  }, [pinInput, showPinModal, isLoading, selectedUser, performPinLogin, error]);
 
   const getInitials = (user: QuickLoginUser) => {
     const ime = user.ime?.charAt(0).toUpperCase() || '';
@@ -298,7 +307,30 @@ export default function LoginPage() {
           )}
 
           {/* Email Login Form */}
-          <form className="space-y-4" onSubmit={handleEmailLogin}>
+          <form 
+            className="space-y-4" 
+            onSubmit={handleEmailLogin} 
+            autoComplete="off"
+            data-form-type="other"
+          >
+            {/* Hidden dummy fields to prevent Chrome password save popup */}
+            <input 
+              type="text" 
+              name="fake-username" 
+              autoComplete="username" 
+              style={{ position: 'absolute', left: '-9999px', opacity: 0, pointerEvents: 'none' }} 
+              tabIndex={-1}
+              readOnly
+            />
+            <input 
+              type="password" 
+              name="fake-password" 
+              autoComplete="new-password" 
+              style={{ position: 'absolute', left: '-9999px', opacity: 0, pointerEvents: 'none' }} 
+              tabIndex={-1}
+              readOnly
+            />
+            
             {/* Email Input */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -322,9 +354,11 @@ export default function LoginPage() {
                 </div>
                 <input
                   id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
+                  name="email-input"
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
                   required
                   className="block w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-gray-50 focus:bg-white text-gray-900 placeholder-gray-400 shadow-sm hover:shadow-md"
                   placeholder="unesite@email.com"
@@ -357,9 +391,11 @@ export default function LoginPage() {
                 </div>
                 <input
                   id="lozinka"
-                  name="lozinka"
+                  name="password-input"
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  data-form-type="other"
                   required
                   className="block w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-gray-50 focus:bg-white text-gray-900 placeholder-gray-400 shadow-sm hover:shadow-md"
                   placeholder="••••••••"
@@ -621,16 +657,26 @@ export default function LoginPage() {
                     <div className="relative">
                       <input
                         id="pin"
+                        name="pin-input"
                         type="password"
                         inputMode="numeric"
                         maxLength={6}
                         autoFocus
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-form-type="other"
                         disabled={isLoading}
                         value={pinInput}
                         onChange={(e) => {
                           const value = e.target.value.replace(/\D/g, '');
                           setPinInput(value);
                           setError('');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && pinInput.length >= 4 && !isLoading) {
+                            e.preventDefault();
+                            performPinLogin();
+                          }
                         }}
                         className="block w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-center text-2xl font-mono tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
                         placeholder="0000"

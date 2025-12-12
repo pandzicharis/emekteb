@@ -75,7 +75,7 @@ const getMenuItems = (uloga: string): MenuEntry[] => {
   if (uloga === 'ADMIN') {
     baseItems.push({
       type: 'group',
-      name: 'Ucenici',
+      name: 'Učenici',
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 20v-2a3 3 0 013-3h8a3 3 0 013 3v2M7 7a5 5 0 1010 0 5 5 0 00-10 0z" />
@@ -375,9 +375,11 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
                 )}
                 <div className={`min-w-0 ${isOpen ? 'opacity-100' : 'opacity-0 max-w-0 overflow-hidden'} transition-all duration-300`}>
                   <div className="text-sm text-gray-300 font-medium truncate">
-                    {user.ime && user.prezime ? `${user.ime} ${user.prezime}` : user.email}
+                    {user.uloga === 'ADMIN' ? 'ADMIN' : (user.ime && user.prezime ? `${user.ime} ${user.prezime}` : user.email)}
                   </div>
-                  <div className="text-xs text-gray-500 capitalize">{user.uloga.toLowerCase()}</div>
+                  <div className="text-xs text-gray-500 truncate">
+                    {user.uloga === 'ADMIN' ? (user.email || '') : user.uloga.toLowerCase()}
+                  </div>
                 </div>
               </div>
               <button

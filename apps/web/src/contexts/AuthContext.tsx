@@ -108,7 +108,7 @@ axios.interceptors.response.use(
   (response) => response,
   (error) => {
     // Ne preusmjeravaj na login za auth endpoint-e (login i login/pin)
-    const isAuthEndpoint = error.config?.url?.includes('/auth/login');
+    const isAuthEndpoint = error.config?.url?.includes('/auth/login') || error.config?.url?.includes('/auth/pin');
     
     if (error.response?.status === 401 && !isAuthEndpoint) {
       localStorage.removeItem('token');
