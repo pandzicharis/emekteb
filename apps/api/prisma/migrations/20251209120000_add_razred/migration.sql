@@ -19,3 +19,4 @@ CREATE UNIQUE INDEX "razredi_name_key" ON "razredi"("name");
 
 
 
+
