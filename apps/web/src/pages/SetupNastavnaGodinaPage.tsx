@@ -1,5 +1,4 @@
 import { useMemo, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 type NastavniPlan = { id: string; naziv: string };
@@ -27,16 +26,7 @@ type ApiRazred = {
 
 const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
 
-// Fallback mock podaci ako API nije dostupan
-const FALLBACK_UCENICI: Ucenik[] = Array.from({ length: 40 }).map((_, idx) => ({
-  id: `u-${idx + 1}`,
-  ime: `Ucenik ${idx + 1}`,
-  prezime: `Prezime ${idx + 1}`,
-  email: `ucenik${idx + 1}@example.com`,
-}));
-
 const WEEKEND_DAYS: Schedule['day'][] = ['subota', 'nedjelja'];
-const SLOT_TIMES = ['09:00', '09:45', '10:30', '11:15', '12:00', '12:45', '13:30', '14:15'];
 
 // Timeline constants
 const TIMELINE_START_HOUR = 8; // 08:00
@@ -151,13 +141,72 @@ type StepData = {
   };
 };
 
+type NastavnaGodinaCard = {
+  id: string;
+  naziv: string;
+  opis?: string | null;
+  datumOd: string;
+  datumDo: string;
+  status: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED';
+  nastavniPlan?: { id: string; naziv: string } | null;
+  razredi?: Array<{ razred?: ApiRazred; split?: boolean }> | null;
+  _count?: { razredi: number };
+};
+
+type ApiGrupa = {
+  naziv: string;
+  kuran?: boolean;
+  sufara?: boolean;
+  raspored?: Array<{
+    dan?: Schedule['day'];
+    day?: Schedule['day'];
+    slot?: string;
+    lokacija?: string;
+    location?: string;
+    trajanje?: number;
+    duration?: number;
+  }>;
+  ucenici?: Array<{ ucenik?: { id: string } }>;
+};
+
+type ApiRazredGodina = {
+  razred?: ApiRazred;
+  razredId?: string;
+  split?: boolean;
+  muallim?: { korisnik?: Muallim };
+  muallimId?: string;
+  grupe?: ApiGrupa[];
+};
+
+type ApiGodinaDetails = NastavnaGodinaCard & {
+  nastavniPlanId?: string;
+  razredi?: ApiRazredGodina[] | null;
+};
+
+const emptyForm: StepData = {
+  korak1: {
+    naziv: '',
+    opis: '',
+    periodOd: '',
+    periodDo: '',
+    planId: '',
+    status: 'ACTIVE',
+  },
+  korak2: {
+    razredi: [],
+  },
+  korak3: {},
+};
+
 export default function SetupNastavnaGodinaPage() {
-  const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [expandedRazred, setExpandedRazred] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
   const [search, setSearch] = useState('');
   const [occupiedFilter, setOccupiedFilter] = useState('');
   const [dragging, setDragging] = useState<{ razred: number; ucenikId: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [hoverDrop, setHoverDrop] = useState<{ razred: number; group: 'A' | 'B' } | null>(null);
   const [razredActiveStep, setRazredActiveStep] = useState<Record<number, number>>({});
   const [savedSteps, setSavedSteps] = useState<Record<number, Set<number>>>({});
@@ -167,6 +216,9 @@ export default function SetupNastavnaGodinaPage() {
   const [razredi, setRazredi] = useState<ApiRazred[]>([]);
   const [loadingRazredi, setLoadingRazredi] = useState(false);
   const [razrediError, setRazrediError] = useState<string | null>(null);
+  const [godine, setGodine] = useState<NastavnaGodinaCard[]>([]);
+  const [godineLoading, setGodineLoading] = useState(false);
+  const [godineError, setGodineError] = useState<string | null>(null);
   const [plans, setPlans] = useState<NastavniPlan[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
   const [plansError, setPlansError] = useState<string | null>(null);
@@ -177,6 +229,10 @@ export default function SetupNastavnaGodinaPage() {
   const [planDetailsLoading, setPlanDetailsLoading] = useState(false);
   const [planDetailsError, setPlanDetailsError] = useState<string | null>(null);
   const [planRazredIds, setPlanRazredIds] = useState<string[]>([]);
+  const [editingGodinaId, setEditingGodinaId] = useState<string | null>(null);
+  const [godinaDetailsLoading, setGodinaDetailsLoading] = useState(false);
+  const [godinaDetailsError, setGodinaDetailsError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     const fetchUcenici = async () => {
@@ -184,17 +240,10 @@ export default function SetupNastavnaGodinaPage() {
         const response = await axios.get<Ucenik[]>(`${API_URL}/ucenici`, {
           timeout: 5000, // 5 sekundi timeout
         });
-        if (response.data && response.data.length > 0) {
-          setUcenici(response.data);
-        } else {
-          // Ako je response prazan, koristi fallback
-          console.warn('API vratio prazan array, koristim fallback podatke');
-          setUcenici(FALLBACK_UCENICI);
-        }
+        setUcenici(response.data ?? []);
       } catch (error) {
-        console.warn('API nije dostupan, koristim fallback podatke:', error);
-        // Fallback na mock podatke ako API nije dostupan
-        setUcenici(FALLBACK_UCENICI);
+        console.warn('API nije dostupan za učenike:', error);
+        setUcenici([]);
       }
     };
 
@@ -264,6 +313,16 @@ export default function SetupNastavnaGodinaPage() {
 
     fetchRazredi();
   }, []);
+
+  useEffect(() => {
+    loadGodine();
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const setActiveRazredStep = (razred: number, nextStep: number) => {
     setRazredActiveStep((prev) => ({
@@ -362,20 +421,7 @@ export default function SetupNastavnaGodinaPage() {
     },
   });
 
-  const [data, setData] = useState<StepData>({
-    korak1: {
-      naziv: 'Nastavna godina 2025/2026',
-      opis: 'Postavi raspored, razrede i grupe za novu školsku godinu.',
-      periodOd: '2025-09-01',
-      periodDo: '2026-06-10',
-      planId: '',
-      status: 'ACTIVE',
-    },
-    korak2: {
-      razredi: [],
-    },
-    korak3: {},
-  });
+  const [data, setData] = useState<StepData>(emptyForm);
 
   const razrediOptions = useMemo(
     () =>
@@ -413,6 +459,131 @@ export default function SetupNastavnaGodinaPage() {
     return map;
   }, [muallimi]);
 
+  const loadGodine = async () => {
+    setGodineLoading(true);
+    setGodineError(null);
+    try {
+      const response = await axios.get<NastavnaGodinaCard[]>(`${API_URL}/nastavne-godine`, { timeout: 6000 });
+      setGodine(response.data ?? []);
+    } catch (error) {
+      console.warn('Neuspješno dohvaćanje nastavnih godina', error);
+      setGodineError('Nisam uspio dohvatiti nastavne godine.');
+    } finally {
+      setGodineLoading(false);
+    }
+  };
+
+  const startNewGodina = () => {
+    setEditingGodinaId(null);
+    setGodinaDetailsError(null);
+    setSaveError(null);
+    setViewMode('create');
+    setStep(1);
+    setExpandedRazred(null);
+    setRazredActiveStep({});
+    setSavedSteps({});
+    setEditingSteps({});
+    setHoverDrop(null);
+    setData((prev) => ({
+      ...emptyForm,
+      korak1: { ...emptyForm.korak1, planId: prev.korak1.planId || plans[0]?.id || emptyForm.korak1.planId },
+    }));
+  };
+
+  const loadGodina = async (godinaId: string) => {
+    setGodinaDetailsLoading(true);
+    setGodinaDetailsError(null);
+    setSaveError(null);
+    setExpandedRazred(null);
+    setHoverDrop(null);
+    try {
+      const response = await axios.get<ApiGodinaDetails>(`${API_URL}/nastavne-godine/${godinaId}`, { timeout: 8000 });
+      const godina = response.data;
+      const razrediEntries = godina?.razredi ?? [];
+      const korak3: StepData['korak3'] = {};
+      const saved: Record<number, Set<number>> = {};
+      const active: Record<number, number> = {};
+      const razrediNums: number[] = [];
+
+      const toSchedule = (grupa?: ApiGrupa): Schedule => {
+        const raw = Array.isArray(grupa?.raspored) ? grupa?.raspored?.[0] : grupa?.raspored;
+        return {
+          day: (raw?.dan ?? raw?.day ?? 'subota') as Schedule['day'],
+          slot: raw?.slot ?? '',
+          location: (raw?.lokacija ?? raw?.location ?? 'ucionica') as Schedule['location'],
+          duration: raw?.trajanje ?? raw?.duration ?? 45,
+        };
+      };
+
+      razrediEntries.forEach((entry: ApiRazredGodina) => {
+        const match = entry?.razred?.name?.match?.(/\d+/);
+        const razredNum = match ? Number(match[0]) : NaN;
+        if (Number.isNaN(razredNum)) return;
+        razrediNums.push(razredNum);
+
+        const grupaA = (entry?.grupe ?? []).find((g) => g.naziv === 'A');
+        const grupaB = (entry?.grupe ?? []).find((g) => g.naziv === 'B');
+        const uceniciA = (grupaA?.ucenici ?? []).map((u) => u?.ucenik?.id).filter(Boolean) as string[];
+        const uceniciB = (grupaB?.ucenici ?? []).map((u) => u?.ucenik?.id).filter(Boolean) as string[];
+        const splitOn = !!entry?.split;
+
+        korak3[razredNum] = {
+          razredId: entry?.razredId ?? entry?.razred?.id ?? getRazredId(razredNum),
+          muallimId: entry?.muallim?.korisnik?.id ?? entry?.muallimId ?? null,
+          ucenici: uceniciA,
+          split: { enabled: splitOn, groupA: uceniciA, groupB: uceniciB, selectionDone: true },
+          settings: splitOn
+            ? {
+                groupA: { kuran: grupaA?.kuran ?? false, sufara: grupaA?.sufara ?? false },
+                groupB: { kuran: grupaB?.kuran ?? false, sufara: grupaB?.sufara ?? false },
+              }
+            : {
+                single: { kuran: grupaA?.kuran ?? false, sufara: grupaA?.sufara ?? false },
+                groupA: { kuran: grupaA?.kuran ?? false, sufara: grupaA?.sufara ?? false },
+              },
+          raspored: splitOn
+            ? {
+                single: toSchedule(grupaA),
+                groupA: toSchedule(grupaA),
+                groupB: toSchedule(grupaB),
+              }
+            : {
+                single: toSchedule(grupaA),
+              },
+        };
+
+        saved[razredNum] = new Set([1, 2, 3, 4]);
+        active[razredNum] = 4;
+      });
+
+      setData({
+        korak1: {
+          naziv: godina?.naziv ?? '',
+          opis: godina?.opis ?? '',
+          periodOd: godina?.datumOd ? godina.datumOd.slice(0, 10) : '',
+          periodDo: godina?.datumDo ? godina.datumDo.slice(0, 10) : '',
+          planId: godina?.nastavniPlanId ?? godina?.nastavniPlan?.id ?? '',
+          status: (godina?.status ?? 'ACTIVE') as StepData['korak1']['status'],
+        },
+        korak2: { razredi: Array.from(new Set(razrediNums)) },
+        korak3,
+      });
+      setSavedSteps(saved);
+      setRazredActiveStep(active);
+      setEditingSteps({});
+      setEditingGodinaId(godinaId);
+      setStep(1);
+      setViewMode('create');
+      setToast({ type: 'success', message: 'Detalji učitani.' });
+    } catch (error) {
+      console.warn('Neuspješno dohvaćanje nastavne godine', error);
+      setGodinaDetailsError('Nisam uspio dohvatiti nastavnu godinu.');
+      setToast({ type: 'error', message: 'Greška pri učitavanju godine.' });
+    } finally {
+      setGodinaDetailsLoading(false);
+    }
+  };
+
   useEffect(() => {
     const fetchPlanDetails = async () => {
       const planId = data.korak1.planId;
@@ -446,7 +617,7 @@ export default function SetupNastavnaGodinaPage() {
     };
 
     fetchPlanDetails();
-  }, [data.korak1.planId, razrediOptions, API_URL]);
+  }, [data.korak1.planId, razrediOptions]);
 
   useEffect(() => {
     // Očisti odabir razreda koji nisu u planu
@@ -555,6 +726,27 @@ export default function SetupNastavnaGodinaPage() {
       razredi: koraci,
     };
   }, [data, razredByNumber]);
+
+  const toastNode = toast ? (
+    <div className="fixed top-4 right-4 z-50">
+      <div
+        className={`flex items-start gap-3 px-4 py-3 rounded-lg shadow-lg border ${
+          toast.type === 'success'
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+            : 'bg-red-50 border-red-200 text-red-900'
+        }`}
+      >
+        <svg className="w-5 h-5 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {toast.type === 'success' ? (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          ) : (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          )}
+        </svg>
+        <div className="text-sm leading-5">{toast.message}</div>
+      </div>
+    </div>
+  ) : null;
 
   type OccupiedSlotInfo = {
     razred: number;
@@ -1116,6 +1308,22 @@ export default function SetupNastavnaGodinaPage() {
     const initialSelection = allSelected.length > 0 ? allSelected : oldUcenici;
     const selected = new Set(initialSelection);
 
+    // Sakrij učenike koji su već dodijeljeni drugim razredima, ali ostavi one već odabrane za ovaj razred
+    const occupiedIds = new Set<string>();
+    data.korak2.razredi.forEach((r) => {
+      if (r === razred) return;
+      const other = data.korak3[r];
+      if (!other) return;
+      const alreadyPlaced = [
+        ...(other.split?.groupA ?? []),
+        ...(other.split?.groupB ?? []),
+        ...(other.ucenici ?? []),
+      ];
+      alreadyPlaced.forEach((id) => occupiedIds.add(id));
+    });
+
+    const availableUcenici = filteredUcenici.filter((u) => !occupiedIds.has(u.id) || selected.has(u.id));
+
     const finalizeSelection = () => {
       const selectedArr = Array.from(selected);
       setData((prev) => {
@@ -1175,7 +1383,7 @@ export default function SetupNastavnaGodinaPage() {
             />
             <div className="h-64 overflow-y-auto border border-gray-200 rounded-lg p-2 bg-white">
               <div className="space-y-1">
-                {filteredUcenici.map((u) => {
+                {availableUcenici.map((u) => {
                   const isSelected = selected.has(u.id);
                   return (
                     <label
@@ -2797,16 +3005,140 @@ const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
   );
 };
 
+  const statusClasses = (status: NastavnaGodinaCard['status']) => {
+    if (status === 'ACTIVE') return 'bg-emerald-100 text-emerald-700';
+    if (status === 'ARCHIVED') return 'bg-amber-100 text-amber-700';
+    return 'bg-gray-100 text-gray-600';
+  };
+
+  const editingExisting = Boolean(editingGodinaId);
+
+  if (viewMode === 'list') {
+    return (
+      <div className="bg-gray-50 min-h-full p-6 lg:p-10">
+        {toastNode}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Nastavne godine</h1>
+            <p className="text-sm text-gray-600 mt-1">Pregled i detalji postojećih nastavnih godina.</p>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6 border border-gray-100">
+          {godineLoading && <div className="text-sm text-gray-500">Učitavam nastavne godine...</div>}
+          {godineError && <div className="text-sm text-red-600">{godineError}</div>}
+          {godinaDetailsError && <div className="text-xs text-red-600 mb-2">{godinaDetailsError}</div>}
+          {!godineLoading && !godineError && (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {godine.length === 0 && (
+                <div className="col-span-full text-sm text-gray-500">Nema kreiranih nastavnih godina.</div>
+              )}
+              {godine.map((g) => (
+                <button
+                  key={g.id}
+                  onClick={() => loadGodina(g.id)}
+                  disabled={godinaDetailsLoading}
+                  className="border border-gray-200 rounded-xl p-4 bg-white shadow-sm text-left hover:shadow-lg hover:-translate-y-0.5 transition-all disabled:opacity-60"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V5a4 4 0 118 0v2M5 9h14v10H5z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <div className="text-base font-semibold text-gray-900">{g.naziv}</div>
+                        <div className="text-xs text-gray-500 mt-1 flex items-center gap-2">
+                          <span className="flex items-center gap-1">
+                            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V5a4 4 0 118 0v2M5 9h14v10H5z" />
+                            </svg>
+                            {g.nastavniPlan?.naziv ?? 'Bez plana'}
+                          </span>
+                          <span className="text-gray-300">•</span>
+                          <span>
+                            {new Date(g.datumOd).toLocaleDateString('bs-BA')} – {new Date(g.datumDo).toLocaleDateString('bs-BA')}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusClasses(g.status)}`}>
+                      {g.status === 'ACTIVE' ? 'Aktivna' : g.status === 'ARCHIVED' ? 'Arhivirana' : 'Neaktivna'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-600 mt-3 line-clamp-3">{g.opis}</p>
+                  <div className="mt-4 flex items-center justify-between text-xs text-gray-500">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h18M3 12h18M3 17h18" />
+                      </svg>
+                      {(g._count?.razredi ?? g.razredi?.length ?? 0)} razreda
+                    </div>
+                    <div className="flex items-center gap-1 text-blue-600 font-medium">
+                      <span className="text-xs">Detalji</span>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                  </div>
+                </button>
+              ))}
+              <button
+                onClick={startNewGodina}
+                className="border border-dashed border-gray-300 rounded-xl p-4 bg-white text-left hover:border-green-400 hover:shadow-md transition-all flex flex-col justify-center gap-2 min-h-[150px]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-green-50 text-green-600 flex items-center justify-center">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="text-base font-semibold text-gray-900">Nova nastavna godina</div>
+                    <div className="text-xs text-gray-500 mt-1">Dodaj novu godinu i postavke</div>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-500 flex items-center gap-2 mt-2">
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h18M3 12h18M3 17h18" />
+                  </svg>
+                  Kreiraj novu godinu
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-gray-50 min-h-full p-6 lg:p-10">
+      {toastNode}
       <div className="w-full max-w-none mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Nastavna godina</h1>
+            <h1 className="text-2xl font-bold text-gray-900">
+              {editingExisting ? 'Uredi nastavnu godinu' : 'Nastavna godina'}
+            </h1>
             <p className="text-sm text-gray-600 mt-1">
               Korak-po-korak: osnovni podaci → odabir razreda → dodjela učenika (sa opcijom split).
             </p>
           </div>
+          <button
+            onClick={() => {
+              setViewMode('list');
+              setEditingGodinaId(null);
+              setSaveError(null);
+            }}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Povratak na listu
+          </button>
         </div>
 
         {renderStepIndicator()}
@@ -2837,19 +3169,74 @@ const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
                 )}
                 {step === 3 && (
                   <button
-                    onClick={() => {
-                      console.log('JSON Payload:', JSON.stringify(payload, null, 2));
-                      navigate('/');
+                    onClick={async () => {
+                      if (!isStep1Valid || !isStep2Valid || !isStep3Valid) return;
+
+                      setSaving(true);
+                      setSaveError(null);
+
+                      try {
+                        const isUpdate = Boolean(editingGodinaId);
+                        const url = isUpdate
+                          ? `${API_URL}/nastavne-godine/${editingGodinaId}`
+                          : `${API_URL}/nastavne-godine`;
+                        const method = isUpdate ? 'put' : 'post';
+
+                        const response = await axios[method](url, payload, {
+                          timeout: 30000,
+                          headers: {
+                            'Content-Type': 'application/json',
+                          },
+                        });
+
+                        if (response.data?.success) {
+                          await loadGodine();
+                          setViewMode('list');
+                          setEditingGodinaId(null);
+                          setData(emptyForm);
+                          setStep(1);
+                          setToast({
+                            type: 'success',
+                            message: isUpdate ? 'Nastavna godina ažurirana.' : 'Nastavna godina sačuvana.',
+                          });
+                        } else {
+                          throw new Error('Neočekivani odgovor sa servera');
+                        }
+                      } catch (error: unknown) {
+                        console.error('Greška pri spašavanju nastavne godine:', error);
+                        const fallback =
+                          typeof error === 'object' && error !== null && 'message' in error
+                            ? String((error as { message?: string }).message)
+                            : 'Greška pri spašavanju nastavne godine';
+                        setSaveError(
+                          // @ts-expect-error - potencijalni Axios odgovor
+                          error?.response?.data?.message || fallback,
+                        );
+                        setToast({ type: 'error', message: 'Spremanje nije uspjelo.' });
+                      } finally {
+                        setSaving(false);
+                      }
                     }}
-                    disabled={!isStep1Valid || !isStep2Valid || !isStep3Valid}
+                    disabled={!isStep1Valid || !isStep2Valid || !isStep3Valid || saving}
                     className="px-6 py-3 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Spremi (JSON)
+                    {saving ? 'Spremanje...' : editingExisting ? 'Ažuriraj' : 'Spremi'}
                   </button>
                 )}
               </div>
             </div>
           </div>
+
+          {saveError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                <p className="text-sm font-medium text-red-800">{saveError}</p>
+              </div>
+            </div>
+          )}
 
           <div className="bg-white rounded-lg shadow p-6 border border-gray-100">
             <h3 className="text-base font-semibold text-gray-900 mb-3">Pregled JSON payloada</h3>
@@ -2868,5 +3255,3 @@ const renderGroupSettings = (razred: number, isReadOnly: boolean = false) => {
     </div>
   );
 }
-
-

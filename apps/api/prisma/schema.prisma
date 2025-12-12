@@ -84,10 +84,12 @@ model Ucenik {
     ucenikSkoleHifza String?
 
     // Relacije
-    korisnik    Korisnik?    @relation(fields: [korisnikId], references: [id], onDelete: Cascade)
-    obrazovanje Obrazovanje?
-    roditelji   Roditelj[]
-    kontakti    Kontakt[]
+    korisnik              Korisnik?              @relation(fields: [korisnikId], references: [id], onDelete: Cascade)
+    obrazovanje           Obrazovanje?
+    roditelji             Roditelj[]
+    kontakti              Kontakt[]
+    grupe                 UcenikGrupa[]
+    razrediNastavneGodine RazredNastavnaGodina[]
 
     @@map("ucenici")
 }
@@ -229,8 +231,9 @@ model Razred {
     ilmihal Ilmihal
     status  Boolean @default(true)
 
-    lekcije         RazredLekcija[]
-    nastavniPlanovi NastavniPlanRazred[]
+    lekcije               RazredLekcija[]
+    nastavniPlanovi       NastavniPlanRazred[]
+    razrediNastavneGodine RazredNastavnaGodina[]
 
     @@map("razredi")
 }
@@ -283,7 +286,8 @@ model NastavniPlan {
     kreiran        DateTime @default(now())
     azuriran       DateTime @updatedAt
 
-    razredi NastavniPlanRazred[]
+    razredi        NastavniPlanRazred[]
+    nastavneGodine NastavnaGodina[]
 
     @@map("nastavni_planovi")
 }
@@ -311,4 +315,107 @@ model NastavniPlanRazredLekcija {
 
     @@unique([nastavniPlanRazredId, lekcijaId])
     @@map("nastavni_plan_razred_lekcije")
+}
+
+// ============================================
+// NASTAVNA GODINA
+// ============================================
+
+enum StatusNastavneGodine {
+    ACTIVE
+    INACTIVE
+    ARCHIVED
+}
+
+enum DanUNedelji {
+    subota
+    nedjelja
+}
+
+model NastavnaGodina {
+    id             String               @id @default(uuid())
+    naziv          String
+    opis           String?
+    datumOd        DateTime
+    datumDo        DateTime
+    nastavniPlanId String
+    status         StatusNastavneGodine @default(ACTIVE)
+    kreiran        DateTime             @default(now())
+    azuriran       DateTime             @updatedAt
+
+    // Relacije
+    nastavniPlan NastavniPlan           @relation(fields: [nastavniPlanId], references: [id], onDelete: Restrict)
+    razredi      RazredNastavnaGodina[]
+
+    @@map("nastavne_godine")
+}
+
+model RazredNastavnaGodina {
+    id               String   @id @default(uuid())
+    nastavnaGodinaId String
+    razredId         String
+    muallimId        String // FK na Ucenik
+    split            Boolean  @default(false) // Da li je razred podijeljen u grupe
+    kreiran          DateTime @default(now())
+    azuriran         DateTime @updatedAt
+
+    // Relacije
+    nastavnaGodina NastavnaGodina @relation(fields: [nastavnaGodinaId], references: [id], onDelete: Cascade)
+    razred         Razred         @relation(fields: [razredId], references: [id], onDelete: Restrict)
+    muallim        Ucenik         @relation(fields: [muallimId], references: [id], onDelete: Restrict)
+    grupe          Grupa[]
+
+    // Constraint: jedan razred može biti samo jednom u jednoj nastavnoj godini u istom trenutku
+    @@unique([nastavnaGodinaId, razredId])
+    @@map("razred_nastavna_godina")
+}
+
+model Grupa {
+    id                     String   @id @default(uuid())
+    razredNastavnaGodinaId String
+    naziv                  String // "A" ili "B"
+    kuran                  Boolean  @default(false)
+    sufara                 Boolean  @default(false)
+    kreiran                DateTime @default(now())
+    azuriran               DateTime @updatedAt
+
+    // Relacije
+    razredNastavnaGodina RazredNastavnaGodina @relation(fields: [razredNastavnaGodinaId], references: [id], onDelete: Cascade)
+    raspored             Raspored?
+    ucenici              UcenikGrupa[]
+
+    @@unique([razredNastavnaGodinaId, naziv])
+    @@map("grupe")
+}
+
+model Raspored {
+    id       String      @id @default(uuid())
+    grupaId  String      @unique
+    dan      DanUNedelji
+    slot     String // Format: "HH:mm" (npr. "09:10")
+    lokacija String?
+    trajanje Int         @default(45) // u minutama
+    kreiran  DateTime    @default(now())
+    azuriran DateTime    @updatedAt
+
+    // Relacije
+    grupa Grupa @relation(fields: [grupaId], references: [id], onDelete: Cascade)
+
+    @@map("rasporedi")
+}
+
+model UcenikGrupa {
+    id       String   @id @default(uuid())
+    ucenikId String
+    grupaId  String
+    kreiran  DateTime @default(now())
+    azuriran DateTime @updatedAt
+
+    // Relacije
+    ucenik Ucenik @relation(fields: [ucenikId], references: [id], onDelete: Cascade)
+    grupa  Grupa  @relation(fields: [grupaId], references: [id], onDelete: Cascade)
+
+    // Constraint: jedan učenik može biti samo u jednoj grupi unutar jedne nastavne godine
+    @@unique([ucenikId, grupaId])
+    @@map("ucenik_grupa")
 }
