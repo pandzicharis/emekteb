@@ -2,3 +2,6 @@
 ALTER TABLE "nastavni_plan_razredi" DROP COLUMN IF EXISTS "lekcijePostavke";
 
 
+
+
+

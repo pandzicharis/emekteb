@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from 'react';
+import { useState, useEffect, type MouseEvent, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -93,6 +93,28 @@ const getMenuItems = (uloga: string): MenuEntry[] => {
         },
       ],
     });
+
+    baseItems.push({
+      type: 'group',
+      name: 'Postavke',
+      icon: (
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        </svg>
+      ),
+      items: [
+        {
+          path: '/settings/muallimi',
+          name: 'Muallimi',
+          icon: (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+          ),
+        },
+      ],
+    });
   }
 
   return baseItems;
@@ -102,7 +124,28 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const location = useLocation();
   const { user, logout } = useAuth();
   const menuItems = getMenuItems(user?.uloga || '');
-  const [nastavaOpen, setNastavaOpen] = useState(true);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    'Nastava': false,
+    'Postavke': location.pathname.startsWith('/settings'),
+  });
+  
+  useEffect(() => {
+    // Automatski otvori Postavke grupu ako je aktivna ruta
+    if (location.pathname.startsWith('/settings')) {
+      setOpenGroups(prev => ({
+        ...prev,
+        'Postavke': true,
+      }));
+    }
+  }, [location.pathname]);
+  
+  const toggleGroup = (groupName: string) => {
+    setOpenGroups(prev => ({
+      ...prev,
+      [groupName]: !prev[groupName],
+    }));
+  };
+
   const ensureOpen = (e?: MouseEvent) => {
     if (!isOpen) {
       e?.preventDefault();
@@ -188,12 +231,13 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
           <ul className="space-y-3 px-3 text-[13px]">
             {menuItems.map((item, idx) => {
               if (item.type === 'group') {
+                const isGroupOpen = openGroups[item.name] ?? false;
                 return (
                   <li key={`group-${idx}`} className="mt-2 space-y-1">
                     <button
                       onClick={(e) => {
                         if (ensureOpen(e)) return;
-                        setNastavaOpen((v) => !v);
+                        toggleGroup(item.name);
                       }}
                       className={`w-full flex items-center ${isOpen ? 'gap-3 px-4' : 'justify-center px-0'} py-3 rounded-lg text-sm font-medium text-gray-200 hover:bg-gray-800 hover:text-white transition-colors border border-transparent hover:border-gray-700`}
                     >
@@ -216,7 +260,7 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
                       </span>
                       {isOpen && (
                         <svg
-                          className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${nastavaOpen ? '' : '-rotate-90'}`}
+                          className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${isGroupOpen ? '' : '-rotate-90'}`}
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
@@ -226,13 +270,13 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
                       )}
                     </button>
                     <div
-                      className={`overflow-hidden transition-all duration-300 ease-in-out ${
-                        nastavaOpen && isOpen ? 'max-h-64 opacity-100' : 'max-h-0 opacity-0'
+                      className={`grid transition-all duration-300 ease-in-out ${
+                        isGroupOpen && isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
                       }`}
                     >
-                      <ul className="mt-1 space-y-1 pl-2">
-                        {nastavaOpen && isOpen &&
-                          item.items.map((child) => {
+                      <div className="overflow-hidden min-h-0">
+                        <ul className={`space-y-1 pl-2 ${isGroupOpen && isOpen ? 'mt-1' : 'mt-0'}`}>
+                          {item.items.map((child) => {
                             const isActive = location.pathname === child.path;
                             return (
                               <li key={child.path}>
@@ -263,7 +307,8 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
                               </li>
                             );
                           })}
-                      </ul>
+                        </ul>
+                      </div>
                     </div>
                   </li>
                 );
@@ -313,13 +358,21 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
           {user && (
             <div className={`flex items-center ${isOpen ? 'gap-3 justify-between' : 'gap-0 justify-center'}`}>
               <div className={`flex items-center justify-center ${isOpen ? 'gap-3 min-w-0' : ''}`}>
-                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-sm">
-                  {user.uloga === 'ADMIN'
-                    ? 'A'
-                    : user.ime && user.prezime
-                    ? `${user.ime.charAt(0).toUpperCase()}${user.prezime.charAt(0).toUpperCase()}`
-                    : user.email?.charAt(0).toUpperCase() || 'U'}
-                </div>
+                {user.fotografija ? (
+                  <img
+                    src={`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}${user.fotografija}`}
+                    alt={user.ime && user.prezime ? `${user.ime} ${user.prezime}` : user.email || 'User'}
+                    className="flex-shrink-0 w-10 h-10 rounded-full object-cover border-2 border-gray-700"
+                  />
+                ) : (
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold text-sm">
+                    {user.uloga === 'ADMIN'
+                      ? 'A'
+                      : user.ime && user.prezime
+                      ? `${user.ime.charAt(0).toUpperCase()}${user.prezime.charAt(0).toUpperCase()}`
+                      : user.email?.charAt(0).toUpperCase() || 'U'}
+                  </div>
+                )}
                 <div className={`min-w-0 ${isOpen ? 'opacity-100' : 'opacity-0 max-w-0 overflow-hidden'} transition-all duration-300`}>
                   <div className="text-sm text-gray-300 font-medium truncate">
                     {user.ime && user.prezime ? `${user.ime} ${user.prezime}` : user.email}

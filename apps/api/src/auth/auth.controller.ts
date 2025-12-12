@@ -10,6 +10,12 @@ export class AuthController {
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
   }
+
+  @Post('pin')
+  async loginWithPin(@Body() body: { pin: string; userId?: string }) {
+    console.log('📥 Received PIN login request:', body);
+    return this.authService.loginWithPin(body.pin, body.userId);
+  }
 }
 
 

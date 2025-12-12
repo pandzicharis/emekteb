@@ -48,3 +48,6 @@ export class CreateNastavnaGodinaDto {
   nastavnaGodina!: NastavnaGodinaDto;
   razredi!: RazredNastavnaGodinaDto[];
 }
+
+
+

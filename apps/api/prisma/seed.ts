@@ -12,7 +12,9 @@ async function main() {
   // Kreiraj ADMIN korisnika
   const admin = await prisma.korisnik.upsert({
     where: { email: 'admin@emekteb.ba' },
-    update: {},
+    update: {
+      pin: '0000',
+    },
     create: {
       email: 'admin@emekteb.ba',
       lozinka: hashedPassword,
@@ -20,6 +22,7 @@ async function main() {
       prezime: 'Korisnik',
       uloga: Uloga.ADMIN,
       aktivan: true,
+      pin: '0000',
     },
   });
 
@@ -36,6 +39,7 @@ async function main() {
       prezime: 'Prvi',
       uloga: Uloga.MUALLIM,
       aktivan: true,
+      pin: '1234',
     },
   });
 
@@ -51,6 +55,7 @@ async function main() {
       prezime: 'Drugi',
       uloga: Uloga.MUALLIM,
       aktivan: true,
+      pin: '1235',
     },
   });
 
@@ -194,9 +199,10 @@ async function main() {
 
   console.log('🎉 Seeding completed!');
   console.log('\n📝 Login credentials:');
-  console.log('Admin: admin@emekteb.ba / password123');
-  console.log('Muallim 1: muallim1@emekteb.ba / password123');
-  console.log('Muallim 2: muallim2@emekteb.ba / password123');
+  console.log('Admin: admin@emekteb.ba / password123 / PIN: 0000');
+  console.log('Muallim 1: muallim1@emekteb.ba / password123 / PIN: 1234');
+  console.log('Muallim 2: muallim2@emekteb.ba / password123 / PIN: 1235');
+  console.log('\n💡 Napomena: Admin korisnik također ima PIN za brzi login!');
 }
 
 main()

@@ -10,3 +10,6 @@ import { PrismaModule } from '../prisma/prisma.module';
   exports: [NastavnaGodinaService],
 })
 export class NastavnaGodinaModule {}
+
+
+

@@ -60,3 +60,6 @@ export class NastavnaGodinaController {
     return this.nastavnaGodinaService.findOne(id);
   }
 }
+
+
+
