@@ -1747,6 +1747,7 @@ const renderTimelineSchedule = (
   timelineHover: Record<string, { position: number; day: Schedule['day'] }> = {},
   setTimelineHover: React.Dispatch<React.SetStateAction<Record<string, { position: number; day: Schedule['day'] }>>> = () => {},
   isStep4Saved: boolean = false,
+  isEditing: boolean = false,
 ) => {
   const entry = data.korak3[razred] ?? defaultRazredState(getRazredId(razred));
   const schedule =
@@ -2021,9 +2022,9 @@ const renderTimelineSchedule = (
     return finalized;
   };
 
-  // Exclude current razred/target slot from occupied slots if step 4 is not saved
-  // This ensures the preview slot doesn't appear as an occupied slot
-  const currentRazredPending = !isStep4Saved ? razred : undefined;
+  // Exclude current razred/target slot from occupied slots if step 4 is not saved OR if we're editing
+  // This ensures the preview slot doesn't appear as an occupied slot, and when editing, the old slot is hidden
+  const currentRazredPending = (!isStep4Saved || isEditing) ? razred : undefined;
   const subotaSlots = collectDaySlots('subota', currentRazredPending, target);
   const nedjeljaSlots = collectDaySlots('nedjelja', currentRazredPending, target);
 
@@ -2451,11 +2452,11 @@ const renderTimelineSchedule = (
           </div>
         ) : (
           <div className={`space-y-3 ${ready && (!isReadOnly || isStepEditing(razred, 4)) ? '' : 'opacity-50 pointer-events-none select-none'}`}>
-            {!splitOn && renderTimelineSchedule(razred, 'single', 'Jedna grupa', isReadOnly, timelineHover, setTimelineHover, isStepSaved(razred, 4))}
+            {!splitOn && renderTimelineSchedule(razred, 'single', 'Jedna grupa', isReadOnly, timelineHover, setTimelineHover, isStepSaved(razred, 4), isStepEditing(razred, 4))}
             {splitOn && (
               <div className="space-y-3">
-                {renderTimelineSchedule(razred, 'groupA', 'Grupa 1', isReadOnly, timelineHover, setTimelineHover, isStepSaved(razred, 4))}
-                {renderTimelineSchedule(razred, 'groupB', 'Grupa 2', isReadOnly, timelineHover, setTimelineHover, isStepSaved(razred, 4))}
+                {renderTimelineSchedule(razred, 'groupA', 'Grupa 1', isReadOnly, timelineHover, setTimelineHover, isStepSaved(razred, 4), isStepEditing(razred, 4))}
+                {renderTimelineSchedule(razred, 'groupB', 'Grupa 2', isReadOnly, timelineHover, setTimelineHover, isStepSaved(razred, 4), isStepEditing(razred, 4))}
               </div>
             )}
           </div>

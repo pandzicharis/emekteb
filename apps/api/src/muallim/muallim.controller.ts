@@ -6,10 +6,12 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseInterceptors,
   UploadedFile,
   UseGuards,
   BadRequestException,
+  Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MuallimService } from './muallim.service';
@@ -30,6 +32,16 @@ export class MuallimController {
   @UseGuards(JwtAuthGuard)
   findAll() {
     return this.muallimService.findAll();
+  }
+
+  @Get('dashboard')
+  @UseGuards(JwtAuthGuard)
+  async getDashboard(@Request() req: any, @Query('dan') dan?: 'subota' | 'nedjelja') {
+    if (!req.user || !req.user.id) {
+      throw new BadRequestException('Korisnik nije autentifikovan');
+    }
+    const korisnikId = req.user.id;
+    return this.muallimService.getDashboardData(korisnikId, dan);
   }
 
   @Get(':id')

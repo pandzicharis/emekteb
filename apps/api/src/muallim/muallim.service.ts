@@ -287,6 +287,253 @@ export class MuallimService {
 
     return photoUrl;
   }
+
+  async getDashboardData(korisnikId: string, selectedDay?: 'subota' | 'nedjelja') {
+    if (!korisnikId) {
+      throw new BadRequestException('Korisnik ID je obavezan');
+    }
+
+    // Pronađi muallim korisnika i njegov Ucenik zapis
+    const korisnik = await this.prisma.korisnik.findUnique({
+      where: { id: korisnikId },
+      include: { ucenik: true },
+    });
+
+    if (!korisnik) {
+      throw new NotFoundException(`Korisnik sa ID ${korisnikId} nije pronađen`);
+    }
+
+    if (korisnik.uloga !== 'MUALLIM') {
+      throw new BadRequestException(
+        `Korisnik sa ID ${korisnikId} nije muallim. Trenutna uloga: ${korisnik.uloga}. Dashboard je dostupan samo za muallime.`,
+      );
+    }
+
+    // Ako muallim nema Ucenik zapis, kreiramo ga (kao što se radi u nastavna-godina.service.ts)
+    let muallimUcenikId: string;
+    if (korisnik.ucenik) {
+      muallimUcenikId = korisnik.ucenik.id;
+    } else {
+      // Kreiranje Ucenik zapisa za muallima
+      const noviUcenik = await this.prisma.ucenik.create({
+        data: {
+          korisnikId: korisnik.id,
+          status: 'AKTIVAN',
+        },
+      });
+      muallimUcenikId = noviUcenik.id;
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Pronađi aktivnu nastavnu godinu gdje je danasnji datum između datumOd i datumDo
+    const nastavnaGodina = await this.prisma.nastavnaGodina.findFirst({
+      where: {
+        status: 'ACTIVE',
+        datumOd: { lte: today },
+        datumDo: { gte: today },
+      },
+      include: {
+        nastavniPlan: {
+          select: {
+            id: true,
+            naziv: true,
+            opis: true,
+          },
+        },
+      },
+      orderBy: { kreiran: 'desc' },
+    });
+
+    if (!nastavnaGodina) {
+      return {
+        nastavnaGodina: null,
+        razredi: [],
+        raspored: [],
+        statistike: {
+          ukupnoRazreda: 0,
+          ukupnoUcenika: 0,
+          ukupnoGrupa: 0,
+        },
+      };
+    }
+
+    // Pronađi sve razrede dodijeljene ovom muallimu u ovoj nastavnoj godini
+    const razrediNastavneGodine = await this.prisma.razredNastavnaGodina.findMany({
+      where: {
+        nastavnaGodinaId: nastavnaGodina.id,
+        muallimId: muallimUcenikId,
+      },
+      include: {
+        razred: {
+          select: {
+            id: true,
+            name: true,
+            ilmihal: true,
+          },
+        },
+        grupe: {
+          include: {
+            raspored: true,
+            ucenici: {
+              include: {
+                ucenik: {
+                  select: {
+                    id: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Pripremi podatke o razredima sa brojem djece
+    const razredi = razrediNastavneGodine.map((rng) => {
+      const ukupnoUcenika = rng.grupe.reduce((sum, grupa) => sum + grupa.ucenici.length, 0);
+      
+      return {
+        id: rng.id,
+        razred: {
+          id: rng.razred.id,
+          name: rng.razred.name,
+          ilmihal: rng.razred.ilmihal,
+        },
+        split: rng.split,
+        ukupnoUcenika,
+        grupe: rng.grupe.map((grupa) => ({
+          id: grupa.id,
+          naziv: grupa.naziv,
+          kuran: grupa.kuran,
+          sufara: grupa.sufara,
+          brojUcenika: grupa.ucenici.length,
+          raspored: grupa.raspored,
+        })),
+      };
+    });
+
+    // Odredi dan za raspored (subota ili nedjelja)
+    // Ako je selectedDay proslijeđen, koristi ga, inače koristi trenutni dan
+    let danZaRaspored: 'subota' | 'nedjelja';
+    if (selectedDay) {
+      danZaRaspored = selectedDay;
+    } else {
+      const dayOfWeek = today.getDay(); // 0 = nedjelja, 6 = subota
+      danZaRaspored = dayOfWeek === 6 ? 'subota' : 'nedjelja';
+    }
+
+    // Pronađi SVE rasporede (za statistike i ukupne sate), bez obzira na dan
+    const sviRasporedi = await this.prisma.raspored.findMany({
+      where: {
+        grupa: {
+          razredNastavnaGodina: {
+            nastavnaGodinaId: nastavnaGodina.id,
+            muallimId: muallimUcenikId,
+          },
+        },
+      },
+      include: {
+        grupa: {
+          include: {
+            razredNastavnaGodina: {
+              include: {
+                razred: {
+                  select: {
+                    id: true,
+                    name: true,
+                    ilmihal: true,
+                  },
+                },
+              },
+            },
+            ucenici: {
+              include: {
+                ucenik: {
+                  include: {
+                    korisnik: {
+                      select: {
+                        id: true,
+                        ime: true,
+                        prezime: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        slot: 'asc',
+      },
+    });
+
+    // Helper funkcija za mapiranje rasporeda
+    const mapRaspored = (r: any) => {
+      const [hours, minutes] = r.slot.split(':').map(Number);
+      const startTime = new Date();
+      startTime.setHours(hours, minutes, 0, 0);
+      
+      const endTime = new Date(startTime);
+      endTime.setMinutes(endTime.getMinutes() + (r.trajanje || 45));
+
+      return {
+        id: r.id,
+        grupa: {
+          id: r.grupa.id,
+          naziv: r.grupa.naziv,
+          razred: {
+            id: r.grupa.razredNastavnaGodina.razred.id,
+            name: r.grupa.razredNastavnaGodina.razred.name,
+            ilmihal: r.grupa.razredNastavnaGodina.razred.ilmihal,
+          },
+          kuran: r.grupa.kuran,
+          sufara: r.grupa.sufara,
+          brojUcenika: r.grupa.ucenici.length,
+        },
+        dan: r.dan,
+        slot: r.slot,
+        lokacija: r.lokacija,
+        trajanje: r.trajanje,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+      };
+    };
+
+    // Pripremi timeline podatke - filtriraj po danu za prikaz kalendara
+    const raspored = sviRasporedi
+      .filter((r) => r.dan === danZaRaspored)
+      .map(mapRaspored);
+
+    // Svi rasporedi za statistike (bez filtriranja po danu)
+    const sviRasporediZaStatistike = sviRasporedi.map(mapRaspored);
+
+    // Izračunaj statistike - koristi SVE rasporede za tačne statistike
+    const statistike = {
+      ukupnoRazreda: razredi.length,
+      ukupnoUcenika: razredi.reduce((sum, r) => sum + r.ukupnoUcenika, 0),
+      ukupnoGrupa: razredi.reduce((sum, r) => sum + r.grupe.length, 0),
+      danasnjiCasovi: raspored.length, // Filtrirani raspored za odabrani dan
+    };
+
+    return {
+      nastavnaGodina: {
+        id: nastavnaGodina.id,
+        naziv: nastavnaGodina.naziv,
+        opis: nastavnaGodina.opis,
+        datumOd: nastavnaGodina.datumOd,
+        datumDo: nastavnaGodina.datumDo,
+        nastavniPlan: nastavnaGodina.nastavniPlan,
+      },
+      razredi,
+      raspored, // Filtrirano po danu za prikaz kalendara
+      sviRasporedi: sviRasporediZaStatistike, // Svi slotovi za statistike
+      statistike,
+      odabraniDan: danZaRaspored,
+    };
+  }
 }
 
 
