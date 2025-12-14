@@ -105,6 +105,7 @@ export default function MuallimDashboardPage() {
     return () => clearInterval(interval);
   }, []);
   const [showCasModal, setShowCasModal] = useState(false);
+  const [selectedSlotForModal, setSelectedSlotForModal] = useState<RasporedItem | null>(null);
   const [casFormData, setCasFormData] = useState({
     lekcija: '',
     napomene: '',
@@ -430,13 +431,13 @@ export default function MuallimDashboardPage() {
     return day === 0 || day === 6; // 0 = nedjelja, 6 = subota
   };
 
-  const getCurrentTimeSlot = (raspored: RasporedItem[]) => {
-    if (!isTodayWeekend()) return null;
+  const getCurrentTimeSlots = (raspored: RasporedItem[]) => {
+    if (!isTodayWeekend()) return [];
     
     const now = new Date();
     const currentDay = now.getDay() === 0 ? 'nedjelja' : 'subota';
     
-    return raspored.find((item) => {
+    return raspored.filter((item) => {
       if (item.dan !== currentDay) return false;
       
       const [hours, minutes] = item.slot.split(':').map(Number);
@@ -447,7 +448,7 @@ export default function MuallimDashboardPage() {
       endTime.setMinutes(endTime.getMinutes() + item.trajanje);
       
       return now >= startTime && now <= endTime;
-    }) || null;
+    });
   };
 
   const getCurrentTimePosition = (): number | null => {
@@ -589,8 +590,7 @@ export default function MuallimDashboardPage() {
 
   const { nastavnaGodina, razredi, raspored, statistike, odabraniDan } = dashboardData;
   const progress = nastavnaGodina ? calculateProgress(nastavnaGodina.datumOd, nastavnaGodina.datumDo) : 0;
-  const currentSlot = getCurrentTimeSlot(raspored);
-  const isWeekend = isTodayWeekend();
+  const currentSlots = getCurrentTimeSlots(raspored);
 
   return (
     <div className="bg-slate-50 min-h-screen">
@@ -642,19 +642,9 @@ export default function MuallimDashboardPage() {
             </div>
 
             {/* Current Active Slot Banner */}
-            {currentSlot && (() => {
-              const activeInfo = getIlmihalInfo(currentSlot.grupa.razred.ilmihal);
-              const remaining = getRemainingTime(currentSlot.slot, currentSlot.trajanje);
-              const remainingHours = Math.floor(remaining.minutes / 60);
-              const remainingMins = remaining.minutes % 60;
+            {currentSlots.length > 0 && (() => {
               return (
-                <button
-                  onClick={() => setShowCasModal(true)}
-                  className="mb-4 w-full bg-gradient-to-br from-blue-50 via-indigo-50 via-purple-50 to-blue-50 border border-blue-200 rounded-xl p-5 shadow-md hover:shadow-lg text-left relative overflow-hidden transition-all duration-500 ease-out animate-[fadeInSlide_0.5s_ease-out]"
-                  style={{
-                    animation: 'fadeInSlide 0.5s ease-out',
-                  }}
-                >
+                <div className="mb-4 w-full bg-gradient-to-br from-blue-50 via-indigo-50 via-purple-50 to-blue-50 border border-blue-200 rounded-xl p-5 shadow-md relative overflow-hidden transition-all duration-500 ease-out animate-[fadeInSlide_0.5s_ease-out]">
                   <style>{`
                     @keyframes fadeInSlide {
                       from {
@@ -673,7 +663,8 @@ export default function MuallimDashboardPage() {
                   <div className="absolute inset-0 bg-gradient-to-br from-blue-100/20 via-indigo-100/20 to-purple-100/20"></div>
                   
                   <div className="relative z-10">
-                    <div className="flex items-center gap-3 mb-3">
+                    {/* Header with LIVE indicator */}
+                    <div className="flex items-center gap-3 mb-4">
                       <div className="flex items-center gap-2">
                         <div className="relative">
                           <div className="w-3 h-3 rounded-full bg-red-600 animate-ping absolute"></div>
@@ -686,52 +677,58 @@ export default function MuallimDashboardPage() {
                           {currentTime.toLocaleTimeString('bs-BA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-semibold text-blue-700">
-                          {remainingHours > 0 ? `${remainingHours}h ` : ''}{remainingMins}m {remaining.seconds}s
-                        </div>
-                      </div>
-                      <div className="ml-auto">
-                        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </div>
                     </div>
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center gap-2">
-                        <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <div className="text-sm font-bold text-gray-900">
-                          {formatTime(currentSlot.slot)} - {getEndTime(currentSlot.slot, currentSlot.trajanje)}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                        </svg>
-                        <div className="text-sm font-normal text-gray-700">
-                          {currentSlot.grupa.razred.name} - Grupa {currentSlot.grupa.naziv}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        <div className="text-sm font-normal text-gray-600">
-                          {currentSlot.lokacija === 'divanhana' ? 'Divanhana' : currentSlot.lokacija === 'ucionica' ? 'Učionica' : currentSlot.lokacija || 'Nije određeno'}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-3 text-xs text-blue-700 font-medium flex items-center gap-1">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                      Kliknite da unesete detalje o času
+
+                    {/* Groups grid - one per column */}
+                    <div className={`grid gap-3 ${currentSlots.length === 1 ? 'grid-cols-1' : currentSlots.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                      {currentSlots.map((slot, idx) => {
+                        return (
+                          <button
+                            key={slot.id || idx}
+                            onClick={() => {
+                              setSelectedSlotForModal(slot);
+                              setShowCasModal(true);
+                            }}
+                            className="bg-white/80 backdrop-blur-sm border border-blue-200 rounded-lg p-4 hover:bg-white hover:shadow-md transition-all text-left"
+                          >
+                            <div className="flex flex-col gap-2">
+                              {/* Termin sa ikonicom */}
+                              <div className="flex items-center gap-2">
+                                <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div className="text-sm font-bold text-gray-900">
+                                  {formatTime(slot.slot)} - {getEndTime(slot.slot, slot.trajanje)}
+                                </div>
+                              </div>
+                              
+                              {/* Grupa sa ikonicom */}
+                              <div className="flex items-center gap-2">
+                                <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                                </svg>
+                                <div className="text-sm font-semibold text-gray-900">
+                                  {slot.grupa.razred.name} - Grupa {slot.grupa.naziv}
+                                </div>
+                              </div>
+                              
+                              {/* Lokacija sa ikonicom */}
+                              <div className="flex items-center gap-2">
+                                <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                <div className="text-sm font-normal text-gray-600">
+                                  {slot.lokacija === 'divanhana' ? 'Divanhana' : slot.lokacija === 'ucionica' ? 'Učionica' : slot.lokacija || 'Nije određeno'}
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })()}
 
@@ -866,7 +863,7 @@ export default function MuallimDashboardPage() {
                       const widthPct = 100 / columns;
                       const leftPct = widthPct * index;
                       const margin = 2;
-                      const isActive = currentSlot?.id === slot.item.id;
+                      const isActive = currentSlots.some(s => s.id === slot.item.id);
                       const info = getIlmihalInfo(slot.item.grupa.razred.ilmihal);
 
                       // Use light blue colors for all slots (like SetupNastavnaGodinaPage)
@@ -1118,18 +1115,22 @@ export default function MuallimDashboardPage() {
       </div>
 
       {/* Modal za unos detalja o trenutnom casu */}
-      {showCasModal && currentSlot && (
+      {showCasModal && selectedSlotForModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-bold text-gray-900">Detalji o času</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  {currentSlot.grupa.razred.name} - Grupa {currentSlot.grupa.naziv} • {formatTime(currentSlot.slot)}
+                  {selectedSlotForModal.grupa.razred.name} - Grupa {selectedSlotForModal.grupa.naziv} • {formatTime(selectedSlotForModal.slot)}
                 </p>
               </div>
               <button
-                onClick={() => setShowCasModal(false)}
+                onClick={() => {
+                  setShowCasModal(false);
+                  setSelectedSlotForModal(null);
+                  setCasFormData({ lekcija: '', napomene: '', prisutniUcenici: [] });
+                }}
                 className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center transition-colors"
               >
                 <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1173,7 +1174,7 @@ export default function MuallimDashboardPage() {
                   Prisutni učenici
                 </label>
                 <div className="border border-gray-300 rounded-lg p-3 max-h-64 overflow-y-auto bg-gray-50">
-                  {currentSlot.grupa.brojUcenika === 0 ? (
+                  {selectedSlotForModal.grupa.brojUcenika === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">Nema učenika u ovoj grupi</p>
                   ) : (
                     <div className="space-y-2">
@@ -1189,6 +1190,7 @@ export default function MuallimDashboardPage() {
                 <button
                   onClick={() => {
                     setShowCasModal(false);
+                    setSelectedSlotForModal(null);
                     setCasFormData({ lekcija: '', napomene: '', prisutniUcenici: [] });
                   }}
                   className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium"
@@ -1200,6 +1202,7 @@ export default function MuallimDashboardPage() {
                     // TODO: Implementirati spremanje podataka
                     console.log('Spremanje detalja o casu:', casFormData);
                     setShowCasModal(false);
+                    setSelectedSlotForModal(null);
                     setCasFormData({ lekcija: '', napomene: '', prisutniUcenici: [] });
                   }}
                   disabled={!casFormData.lekcija.trim()}

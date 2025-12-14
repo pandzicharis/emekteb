@@ -208,12 +208,15 @@ export default function NastavniPlanPage() {
       const res = await axios.get(`${API_URL}/nastavni-plan/${planId}`, { timeout: 8000 });
       const { nastavniPlan, razredi, lekcije } = res.data ?? {};
 
+      // Provjeri format razreda - ako su objekti, ekstraktuj ID-ove
+      const razrediIds = (razredi ?? []).map((r: string | { id: string }) => typeof r === 'string' ? r : r.id);
+
       const tipoviLekcija: StepData['tipoviLekcija'] = {};
       const generiraneLekcije: StepData['generiraneLekcije'] = {};
       const odabraneLekcije: StepData['odabraneLekcije'] = {};
       const korak3: StepData['korak3'] = {};
 
-      for (const razredId of razredi ?? []) {
+      for (const razredId of razrediIds) {
         const entry = lekcije?.[razredId];
         if (!entry) continue;
         const tips: TipLekcije[] = [];
@@ -246,7 +249,7 @@ export default function NastavniPlanPage() {
           datumUsvajanja: nastavniPlan?.datumUsvajanja ?? '',
           aktivan: nastavniPlan?.aktivan ?? true,
         },
-        korak2: { razredi: razredi ?? [] },
+        korak2: { razredi: razrediIds },
         korak3,
         tipoviLekcija,
         generiraneLekcije,
@@ -682,35 +685,6 @@ export default function NastavniPlanPage() {
 
   const renderStep2 = () => (
     <div className="space-y-4">
-      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-bold text-gray-700 mb-1">Status</div>
-          <p className="text-xs text-gray-600">Aktivan nastavni plan će biti dostupan za odabir</p>
-        </div>
-        <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 ml-4">
-          <input
-            type="checkbox"
-            checked={data.korak1.aktivan}
-            onChange={(e) =>
-              setData((prev) => ({
-                ...prev,
-                korak1: { ...prev.korak1, aktivan: e.target.checked },
-              }))
-            }
-            className="sr-only peer"
-          />
-          <div className={`relative w-11 h-6 rounded-full transition-colors ${
-            data.korak1.aktivan
-              ? 'bg-green-600'
-              : 'bg-gray-300'
-          }`}>
-            <div className={`absolute top-[2px] left-[2px] bg-white rounded-full h-5 w-5 transition-transform ${
-              data.korak1.aktivan ? 'translate-x-5' : 'translate-x-0'
-            }`}></div>
-          </div>
-        </label>
-      </div>
-
       <div className="flex items-center gap-3 justify-end">
         <div className="flex-1">
           {loadingRazredi && (
@@ -811,27 +785,39 @@ export default function NastavniPlanPage() {
               }}
               className="w-full flex items-center justify-between px-4 py-3"
             >
-              <div className="flex items-center gap-3">
-                {hasLekcije && (
-                  <svg className="w-5 h-5 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
+              <div className="flex items-center gap-3 flex-1">
+                {/* Status ikona */}
+                {hasLekcije ? (
+                  <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
                 )}
-                <span className="text-base font-semibold text-gray-900">{labelGrupa(razredObj?.nameNum ?? 0)}</span>
+                
+                {/* Naziv razreda */}
+                <span className="text-base font-bold text-gray-900">{labelGrupa(razredObj?.nameNum ?? 0)}</span>
+                
+                {/* Ilmihal badge - desno */}
+                <div className="flex-1" />
                 {(() => {
                   const razredFull = razrediData.find((rr) => rr.id === rId);
                   const info = ilmihalInfo(razredFull, razredObj?.nameNum);
                   return (
-                    <span className={`text-xs px-2 py-1 rounded border font-semibold ${info.color}`}>
-                      {info.label}
-                    </span>
+                    <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border font-semibold mr-2.5 ${info.color}`}>
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                      </svg>
+                      <span className="text-xs">{info.label}</span>
+                    </div>
                   );
                 })()}
-                {hasLekcije && (
-                  <span className="text-xs text-gray-500 font-medium">
-                    ({lekcije.length} {lekcije.length === 1 ? 'lekcija' : 'lekcija'})
-                  </span>
-                )}
               </div>
               <svg
                 className={`w-5 h-5 text-gray-500 transition-transform ${
@@ -851,110 +837,41 @@ export default function NastavniPlanPage() {
               const sufaraLekcije = sveLekcije.filter((l) => l.tip === 'SUFARA');
               const ukupno = ilmihalLekcije.length + kuranLekcije.length + sufaraLekcije.length;
               
-              if (ukupno === 0) return null;
+              // Provjeri da li je SUFARA aktivan
+              const hasSufara = (data.tipoviLekcija[rId] ?? []).includes('SUFARA');
+              // Broj odabranih KURAN lekcija
+              const kuranCount = data.odabraneLekcije[rId]?.KURAN?.length ?? 0;
               
               return (
                 <div className="mx-4 mb-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {/* ILMIHAL grupa */}
-                    {ilmihalLekcije.length > 0 ? (
-                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                          <span className="text-xs font-semibold text-emerald-800">
-                            ILMIHAL ({ilmihalLekcije.length})
-                          </span>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-3 p-3">
+                      <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                        <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 flex items-center">
+                        {/* Lekcije - broj */}
+                        <div className="flex-1 pr-3 border-r border-gray-300">
+                          <div className="text-lg font-bold text-gray-900">{ukupno}</div>
+                          <div className="text-[10px] text-gray-500 font-medium">Lekcije</div>
                         </div>
-                        <div className="space-y-1 max-h-48 overflow-y-auto">
-                          {ilmihalLekcije.map((lekcija, idx) => (
-                            <div key={lekcija.id} className="flex items-center gap-2 text-xs pl-4">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
-                              <span className="text-emerald-700">
-                                {idx + 1}. {lekcija.naslov || 'Naslov lekcije'}
-                              </span>
-                            </div>
-                          ))}
+                        {/* Sufara - boolean */}
+                        <div className="flex-1 px-3 border-r border-gray-300">
+                          <div className="flex items-center gap-1.5">
+                            <div className={`w-3 h-3 rounded-full ${hasSufara ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                            <div className="text-sm font-semibold text-gray-900">{hasSufara ? 'Da' : 'Ne'}</div>
+                          </div>
+                          <div className="text-[10px] text-gray-500 font-medium">Sufara</div>
+                        </div>
+                        {/* Kuran - broj */}
+                        <div className="flex-1 pl-3">
+                          <div className="text-lg font-bold text-gray-900">{kuranCount}</div>
+                          <div className="text-[10px] text-gray-500 font-medium">Kuran</div>
                         </div>
                       </div>
-                    ) : (
-                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 opacity-50">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-2 h-2 rounded-full bg-gray-400"></div>
-                          <span className="text-xs font-semibold text-gray-500">
-                            ILMIHAL (0)
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* KURAN grupa */}
-                    {kuranLekcije.length > 0 ? (
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                          <span className="text-xs font-semibold text-amber-800">
-                            KURAN ({kuranLekcije.length})
-                          </span>
-                        </div>
-                        <div className="space-y-1 max-h-48 overflow-y-auto">
-                          {kuranLekcije.map((lekcija, idx) => (
-                            <div key={lekcija.id} className="flex items-center gap-2 text-xs pl-4">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0"></span>
-                              <span className="text-amber-700">
-                                {idx + 1}. {lekcija.naslov || 'Naslov lekcije'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 opacity-50">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-2 h-2 rounded-full bg-gray-400"></div>
-                          <span className="text-xs font-semibold text-gray-500">
-                            KURAN (0)
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* SUFARA grupa */}
-                    {sufaraLekcije.length > 0 ? (
-                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-                          <span className="text-xs font-semibold text-purple-800">
-                            SUFARA ({sufaraLekcije.length})
-                          </span>
-                        </div>
-                        <div className="space-y-1 max-h-48 overflow-y-auto">
-                          {sufaraLekcije.map((lekcija, idx) => (
-                            <div key={lekcija.id} className="flex items-center gap-2 text-xs pl-4">
-                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0"></span>
-                              <span className="text-purple-700">
-                                {idx + 1}. {lekcija.naslov || 'Naslov lekcije'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 opacity-50">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-2 h-2 rounded-full bg-gray-400"></div>
-                          <span className="text-xs font-semibold text-gray-500">
-                            SUFARA (0)
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Ukupno */}
-                  <div className="text-center pt-3 mt-3 border-t border-gray-200">
-                    <span className="text-xs text-gray-600">
-                      Ukupno lekcija: <span className="font-semibold text-gray-900">{ukupno}</span>
-                    </span>
+                    </div>
                   </div>
                 </div>
               );
