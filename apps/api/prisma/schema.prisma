@@ -16,18 +16,18 @@ datasource db {
 // ============================================
 
 model Korisnik {
-    id              String    @id @default(uuid())
-    email           String?   @unique
-    lozinka         String // Hashed password
-    ime             String?
-    prezime         String?
-    uloga           Uloga     @default(UCENIK)
-    aktivan         Boolean   @default(true)
-    fotografija     String? // URL ili path do fotografije
-    pin             String?   @unique // PIN za brzi login (4-6 cifara)
+    id                 String    @id @default(uuid())
+    email              String?   @unique
+    lozinka            String // Hashed password
+    ime                String?
+    prezime            String?
+    uloga              Uloga     @default(UCENIK)
+    aktivan            Boolean   @default(true)
+    fotografija        String? // URL ili path do fotografije
+    pin                String?   @unique // PIN za brzi login (4-6 cifara)
     poslednjeLogiranje DateTime? // Vreme poslednjeg logiranja
-    kreiran         DateTime  @default(now())
-    azuriran        DateTime  @updatedAt
+    kreiran            DateTime  @default(now())
+    azuriran           DateTime  @updatedAt
 
     // Relacije
     ucenik Ucenik?

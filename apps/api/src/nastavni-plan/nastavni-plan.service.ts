@@ -91,6 +91,22 @@ export class NastavniPlanService {
         // Poveži postojeće lekcije (KURAN/SUFARA) sa nastavnim planom
         const existingIds = [...(SUFARA ?? []), ...(KURAN ?? [])];
         for (const lekcijaId of existingIds) {
+          // Veza na razred (RazredLekcija) – osiguraj da je lekcija povezana sa ovim razredom
+          await tx.razredLekcija.upsert({
+            where: {
+              razredId_lekcijaId: {
+                razredId,
+                lekcijaId,
+              },
+            },
+            update: {},
+            create: {
+              razredId,
+              lekcijaId,
+            },
+          });
+
+          // Veza na nastavni plan / razred
           await tx.nastavniPlanRazredLekcija.upsert({
             where: {
               nastavniPlanRazredId_lekcijaId: {
@@ -106,32 +122,56 @@ export class NastavniPlanService {
           });
         }
 
-        // Kreiraj i poveži ILMIHAL lekcije (ako ih korisnik unosi)
+        // Kreiraj/azuriraj i poveži ILMIHAL lekcije
+        // - Ako lekcija ima stvarni ID iz baze: azuriramo postojeću lekciju i samo ponovo vežemo relacije
+        // - Ako je ID privremeni sa frontenda (npr. "lekcija-...") ili ne postoji: kreiramo novu lekciju i vežemo je
         if (ILMIHAL && ILMIHAL.length > 0) {
           for (const lek of ILMIHAL) {
-            const created = await tx.lekcija.create({
-              data: {
-                naslov: lek.naslov ?? '',
-                opis: lek.opis ?? '',
-                tezina: lek.tezina ?? 1,
-                redoslijed: lek.redoslijed ?? 0,
-                aktivan: lek.aktivan ?? true,
-                tip: TipLekcije.ILMIHAL,
-              },
-            });
+            let lekcijaId: string;
+
+            const hasRealId = lek.id && !lek.id.startsWith('lekcija-');
+
+            if (hasRealId) {
+              // Postojeća ILMIHAL lekcija – azuriraj osnovne podatke
+              const updated = await tx.lekcija.update({
+                where: { id: lek.id as string },
+                data: {
+                  naslov: lek.naslov ?? '',
+                  opis: lek.opis ?? '',
+                  tezina: lek.tezina ?? 1,
+                  redoslijed: lek.redoslijed ?? 0,
+                  aktivan: lek.aktivan ?? true,
+                  tip: TipLekcije.ILMIHAL,
+                },
+              });
+              lekcijaId = updated.id;
+            } else {
+              // Nova ILMIHAL lekcija – kreiraj zapis (ignoriramo privremeni frontend ID)
+              const created = await tx.lekcija.create({
+                data: {
+                  naslov: lek.naslov ?? '',
+                  opis: lek.opis ?? '',
+                  tezina: lek.tezina ?? 1,
+                  redoslijed: lek.redoslijed ?? 0,
+                  aktivan: lek.aktivan ?? true,
+                  tip: TipLekcije.ILMIHAL,
+                },
+              });
+              lekcijaId = created.id;
+            }
 
             // Veza na razred (RazredLekcija)
             await tx.razredLekcija.upsert({
               where: {
                 razredId_lekcijaId: {
                   razredId,
-                  lekcijaId: created.id,
+                  lekcijaId,
                 },
               },
               update: {},
               create: {
                 razredId,
-                lekcijaId: created.id,
+                lekcijaId,
               },
             });
 
@@ -140,13 +180,13 @@ export class NastavniPlanService {
               where: {
                 nastavniPlanRazredId_lekcijaId: {
                   nastavniPlanRazredId: npRazred.id,
-                  lekcijaId: created.id,
+                  lekcijaId,
                 },
               },
               update: {},
               create: {
                 nastavniPlanRazredId: npRazred.id,
-                lekcijaId: created.id,
+                lekcijaId,
               },
             });
           }

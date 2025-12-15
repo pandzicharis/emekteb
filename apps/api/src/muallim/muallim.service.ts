@@ -450,7 +450,9 @@ export class MuallimService {
             ucenici: {
               include: {
                 ucenik: {
-                  include: {
+                  select: {
+                    id: true,
+                    datumRodjenja: true,
                     korisnik: {
                       select: {
                         id: true,
@@ -492,6 +494,15 @@ export class MuallimService {
           kuran: r.grupa.kuran,
           sufara: r.grupa.sufara,
           brojUcenika: r.grupa.ucenici.length,
+          // Lista učenika u ovoj grupi (za prisustvo u CasEntryDrawer-u)
+          ucenici: r.grupa.ucenici.map((ug: any) => ({
+            id: ug.ucenik.korisnik?.id ?? ug.ucenik.id,
+            ime: ug.ucenik.korisnik?.ime ?? '',
+            prezime: ug.ucenik.korisnik?.prezime ?? '',
+            godinaRodjenja: ug.ucenik.datumRodjenja
+              ? new Date(ug.ucenik.datumRodjenja).getFullYear()
+              : null,
+          })),
         },
         dan: r.dan,
         slot: r.slot,

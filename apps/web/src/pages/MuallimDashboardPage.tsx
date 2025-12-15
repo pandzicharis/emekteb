@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import CasEntryDrawer from '../components/CasEntryDrawer';
+import { RasporedItem } from '../types/raspored';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
 
 interface NastavniPlan {
   id: string;
@@ -48,24 +50,6 @@ interface RazredData {
   grupe: Grupa[];
 }
 
-interface RasporedItem {
-  id: string;
-  grupa: {
-    id: string;
-    naziv: string;
-    razred: Razred;
-    kuran: boolean;
-    sufara: boolean;
-    brojUcenika: number;
-  };
-  dan: string;
-  slot: string;
-  lokacija: string | null;
-  trajanje: number;
-  startTime: string;
-  endTime: string;
-}
-
 interface DashboardData {
   nastavnaGodina: NastavnaGodina | null;
   razredi: RazredData[];
@@ -103,13 +87,8 @@ export default function MuallimDashboardPage() {
     }, 1000);
     return () => clearInterval(interval);
   }, []);
-  const [showCasModal, setShowCasModal] = useState(false);
-  const [selectedSlotForModal, setSelectedSlotForModal] = useState<RasporedItem | null>(null);
-  const [casFormData, setCasFormData] = useState({
-    lekcija: '',
-    napomene: '',
-    prisutniUcenici: [] as string[],
-  });
+  const [showCasDrawer, setShowCasDrawer] = useState(false);
+  const [selectedSlotForDrawer, setSelectedSlotForDrawer] = useState<RasporedItem | null>(null);
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -697,8 +676,8 @@ export default function MuallimDashboardPage() {
                           <button
                             key={slot.id || idx}
                             onClick={() => {
-                              setSelectedSlotForModal(slot);
-                              setShowCasModal(true);
+                              setSelectedSlotForDrawer(slot);
+                              setShowCasDrawer(true);
                             }}
                             className="bg-white/80 backdrop-blur-sm border border-blue-200 rounded-lg p-4 hover:bg-white hover:shadow-md transition-all text-left"
                           >
@@ -894,9 +873,14 @@ export default function MuallimDashboardPage() {
                       const actualLeft = `calc(${leftPct}% + ${margin}px)`;
 
                 return (
-                  <div
+                  <button
                           key={`slot-${selectedDay || odabraniDan}-${idx}`}
-                          className={`absolute rounded-md border-[0.5px] ${getSlotStyle()} px-3 py-2 text-[14px] font-medium`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSlotForDrawer(slot.item);
+                            setShowCasDrawer(true);
+                          }}
+                          className={`absolute rounded-md border-[0.5px] ${getSlotStyle()} px-3 py-2 text-[14px] font-medium text-left`}
                           style={{
                             top: `${top}px`,
                             height: `${Math.max(height, 34)}px`,
@@ -941,7 +925,7 @@ export default function MuallimDashboardPage() {
                         )}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -1138,107 +1122,14 @@ export default function MuallimDashboardPage() {
         </div>
       </div>
 
-      {/* Modal za unos detalja o trenutnom casu */}
-      {showCasModal && selectedSlotForModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">Detalji o času</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  {selectedSlotForModal.grupa.razred.name} - Grupa {selectedSlotForModal.grupa.naziv} • {formatTime(selectedSlotForModal.slot)}
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setShowCasModal(false);
-                  setSelectedSlotForModal(null);
-                  setCasFormData({ lekcija: '', napomene: '', prisutniUcenici: [] });
-                }}
-                className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center transition-colors"
-              >
-                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="p-6 space-y-6">
-              {/* Lekcija */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Lekcija *
-                </label>
-                <input
-                  type="text"
-                  value={casFormData.lekcija}
-                  onChange={(e) => setCasFormData(prev => ({ ...prev, lekcija: e.target.value }))}
-                  placeholder="Unesite naziv lekcije..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              {/* Napomene */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Napomene
-                </label>
-                <textarea
-                  value={casFormData.napomene}
-                  onChange={(e) => setCasFormData(prev => ({ ...prev, napomene: e.target.value }))}
-                  placeholder="Dodatne napomene o času..."
-                  rows={4}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-              </div>
-
-              {/* Prisutni učenici */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Prisutni učenici
-                </label>
-                <div className="border border-gray-300 rounded-lg p-3 max-h-64 overflow-y-auto bg-gray-50">
-                  {selectedSlotForModal.grupa.brojUcenika === 0 ? (
-                    <p className="text-sm text-gray-500 text-center py-4">Nema učenika u ovoj grupi</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {/* TODO: Ovdje će se prikazati lista učenika kada API vrati podatke */}
-                      <p className="text-sm text-gray-500">Lista učenika će se učitati...</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
-                <button
-                  onClick={() => {
-                    setShowCasModal(false);
-                    setSelectedSlotForModal(null);
-                    setCasFormData({ lekcija: '', napomene: '', prisutniUcenici: [] });
-                  }}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium"
-                >
-                  Odustani
-                </button>
-                <button
-                  onClick={async () => {
-                    // TODO: Implementirati spremanje podataka
-                    console.log('Spremanje detalja o casu:', casFormData);
-                    setShowCasModal(false);
-                    setSelectedSlotForModal(null);
-                    setCasFormData({ lekcija: '', napomene: '', prisutniUcenici: [] });
-                  }}
-                  disabled={!casFormData.lekcija.trim()}
-                  className="px-6 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Spremi
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <CasEntryDrawer
+        open={showCasDrawer}
+        slot={selectedSlotForDrawer}
+        onClose={() => {
+          setShowCasDrawer(false);
+          setSelectedSlotForDrawer(null);
+        }}
+      />
     </div>
   );
 }
