@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -81,21 +81,20 @@ interface DashboardData {
 }
 
 export default function MuallimDashboardPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDay, setSelectedDay] = useState<'subota' | 'nedjelja' | null>(null);
-  const [currentTime, setCurrentTime] = useState(new Date());
-
-  // Auto-select today's day if it's weekend
-  useEffect(() => {
-    if (isTodayWeekend() && !selectedDay) {
-      const today = new Date().getDay();
-      const todayDay = today === 0 ? 'nedjelja' : 'subota';
-      setSelectedDay(todayDay);
+  // Postavi selectedDay na osnovu dana u sedmici ako je vikend
+  const [selectedDay, setSelectedDay] = useState<'subota' | 'nedjelja' | null>(() => {
+    const today = new Date();
+    const day = today.getDay();
+    if (day === 0 || day === 6) { // 0 = nedjelja, 6 = subota
+      return day === 0 ? 'nedjelja' : 'subota';
     }
-  }, []);
+    return null;
+  });
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   // Update current time every second for timer
   useEffect(() => {
@@ -112,11 +111,7 @@ export default function MuallimDashboardPage() {
     prisutniUcenici: [] as string[],
   });
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [selectedDay]);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -136,7 +131,23 @@ export default function MuallimDashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedDay]);
+
+  // Učitaj podatke kada je user dostupan (nakon login-a ili refresh-a) ili kada se promijeni selectedDay
+  useEffect(() => {
+    console.log('MuallimDashboardPage useEffect:', { authLoading, user: user?.id, selectedDay, dashboardData: !!dashboardData });
+    // Učitaj podatke ako:
+    // 1. User je dostupan i authLoading je false
+    // 2. DashboardData nije postavljen (npr. nakon refresh-a)
+    if (!authLoading && user) {
+      console.log('Calling fetchDashboardData...');
+      fetchDashboardData();
+    } else if (!authLoading && !user) {
+      console.log('User not available, skipping fetchDashboardData');
+    } else if (authLoading) {
+      console.log('Auth still loading, waiting...');
+    }
+  }, [selectedDay, user, authLoading, fetchDashboardData]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -1054,6 +1065,7 @@ export default function MuallimDashboardPage() {
                                 const programBadges = [];
                                 if (grupa.kuran) programBadges.push('Kuran');
                                 if (grupa.sufara) programBadges.push('Sufara');
+                                const groupSlots = raspored.filter((item) => item.grupa.id === grupa.id);
                                 
                                 return (
                                   <div
@@ -1094,6 +1106,18 @@ export default function MuallimDashboardPage() {
                                         </div>
                                       </div>
                                     </div>
+                                    {groupSlots.length > 0 && (
+                                      <div className="flex items-center gap-1 text-xs text-gray-600 ml-3 whitespace-nowrap">
+                                        <svg className="w-4 h-4 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <span className="font-semibold">
+                                          {groupSlots
+                                            .map((slot) => `${getDayName(slot.dan)} ${formatTime(slot.slot)}-${getEndTime(slot.slot, slot.trajanje)}`)
+                                            .join(' | ')}
+                                        </span>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}
