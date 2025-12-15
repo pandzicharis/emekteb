@@ -290,6 +290,35 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
     );
   };
 
+  const renderPrisustvoIcon = (status: PrisustvoStatus, active: boolean) => {
+    const base = active ? 'text-white' : 'text-slate-500';
+    if (status === 'PRISUTAN') {
+      return (
+        <svg className={`w-4 h-4 ${base}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      );
+    }
+    if (status === 'OPRAVDAN') {
+      return (
+        <svg className={`w-4 h-4 ${base}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+      );
+    }
+    // NEOPRAVDAN
+    return (
+      <svg className={`w-4 h-4 ${base}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    );
+  };
+
   const handleSave = async () => {
     if (!payloadPreview) return;
     setSaving(true);
@@ -644,7 +673,7 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
                           }`}
                         >
                           <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-700">
+                            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-sm font-semibold text-slate-700">
                               {student.ime.charAt(0)}
                               {student.prezime.charAt(0)}
                             </div>
@@ -654,26 +683,23 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
                               </div>
                             </div>
                           </div>
-                          <div className="flex flex-col items-end gap-1">
-                            <div className="inline-flex rounded-full bg-slate-100 p-1.5 gap-1">
+                          <div className="flex flex-col items-end gap-1.5">
+                            <div className="inline-flex rounded-full bg-slate-100 p-1.5 gap-1.5">
                               {[
                                 {
                                   id: 'PRISUTAN',
-                                  label: 'P',
                                   title: 'Prisutan',
                                   className:
                                     'bg-emerald-500 text-white',
                                 },
                                 {
                                   id: 'OPRAVDAN',
-                                  label: 'O',
                                   title: 'Opravdan',
                                   className:
                                     'bg-amber-500 text-white',
                                 },
                                 {
                                   id: 'NEOPRAVDAN',
-                                  label: 'N',
                                   title: 'Neopravdan',
                                   className:
                                     'bg-rose-500 text-white',
@@ -687,14 +713,14 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
                                     onClick={() =>
                                       updatePrisustvo(student.id, opt.id as PrisustvoStatus)
                                     }
-                                    className={`w-8 h-8 text-[11px] font-bold rounded-full flex items-center justify-center transition-all ${
+                                    className={`w-9 h-9 text-[11px] font-bold rounded-full flex items-center justify-center transition-all ${
                                       active
                                         ? opt.className + ' shadow-sm'
                                         : 'bg-transparent text-slate-500 hover:bg-white'
                                     }`}
                                     title={opt.title}
                                   >
-                                    {opt.label}
+                                    {renderPrisustvoIcon(opt.id as PrisustvoStatus, active)}
                                   </button>
                                 );
                               })}

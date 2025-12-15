@@ -19,5 +19,7 @@ export interface RasporedItem {
   trajanje: number;
   startTime: string;
   endTime: string;
+  // Opcionalno: backend može vratiti informaciju da li je unos za ovaj čas već zabilježen
+  imaUnosCasa?: boolean;
 }
 

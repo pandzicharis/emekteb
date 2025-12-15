@@ -421,6 +421,14 @@ export default function MuallimDashboardPage() {
     return day === 0 || day === 6; // 0 = nedjelja, 6 = subota
   };
 
+  const getTodayWeekendDay = (): 'subota' | 'nedjelja' | null => {
+    const today = new Date();
+    const day = today.getDay();
+    if (day === 6) return 'subota';
+    if (day === 0) return 'nedjelja';
+    return null;
+  };
+
   const getCurrentTimeSlots = (raspored: RasporedItem[]) => {
     if (!isTodayWeekend()) return [];
     
@@ -452,6 +460,32 @@ export default function MuallimDashboardPage() {
     if (hours < TIMELINE_START_HOUR || hours >= TIMELINE_END_HOUR) return null;
     
     return timeToPosition(timeString);
+  };
+
+  const isSlotStartedToday = (item: RasporedItem): boolean => {
+    const todayDay = getTodayWeekendDay();
+    if (!todayDay || item.dan !== todayDay) return false;
+
+    const now = new Date();
+    const [hours, minutes] = item.slot.split(':').map(Number);
+    const startTime = new Date();
+    startTime.setHours(hours, minutes, 0, 0);
+
+    return now >= startTime;
+  };
+
+  const isSlotPastToday = (item: RasporedItem): boolean => {
+    const todayDay = getTodayWeekendDay();
+    if (!todayDay || item.dan !== todayDay) return false;
+
+    const now = new Date();
+    const [hours, minutes] = item.slot.split(':').map(Number);
+    const startTime = new Date();
+    startTime.setHours(hours, minutes, 0, 0);
+    const endTime = new Date(startTime);
+    endTime.setMinutes(endTime.getMinutes() + item.trajanje);
+
+    return now > endTime;
   };
 
   const getWeekendCount = (): number => {
@@ -514,6 +548,67 @@ export default function MuallimDashboardPage() {
     // Days until Saturday
     const daysUntilSaturday = 6 - day;
     return daysUntilSaturday;
+  };
+
+  const getTimeUntilNextWeekend = () => {
+    const now = new Date();
+    const day = now.getDay();
+
+    if (day === 0 || day === 6) {
+      return { days: 0, hours: 0 };
+    }
+
+    const target = new Date(now);
+    const daysUntilSaturday = 6 - day;
+    target.setDate(target.getDate() + daysUntilSaturday);
+    target.setHours(TIMELINE_START_HOUR, 0, 0, 0);
+
+    const diffMs = target.getTime() - now.getTime();
+    const totalHours = Math.max(0, Math.round(diffMs / 3600000));
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+
+    return { days, hours };
+  };
+
+  const getNextClassInfo = () => {
+    if (!dashboardData) return null;
+
+    const allSlots = dashboardData.sviRasporedi || dashboardData.raspored || [];
+    if (!allSlots.length) return null;
+
+    const now = new Date();
+    let nextDate: Date | null = null;
+    let nextSlot: RasporedItem | null = null;
+
+    allSlots.forEach((slot) => {
+      const target = new Date(now);
+      const targetDayOfWeek = slot.dan === 'subota' ? 6 : 0; // 6 = subota, 0 = nedjelja
+      let diffDays = targetDayOfWeek - target.getDay();
+      if (diffDays < 0) diffDays += 7;
+      target.setDate(target.getDate() + diffDays);
+
+      const [hours, minutes] = slot.slot.split(':').map(Number);
+      target.setHours(hours, minutes, 0, 0);
+
+      if (target <= now) {
+        target.setDate(target.getDate() + 7);
+      }
+
+      if (!nextDate || target < nextDate) {
+        nextDate = target;
+        nextSlot = slot;
+      }
+    });
+
+    if (!nextDate || !nextSlot) return null;
+
+    const diffMs = nextDate.getTime() - new Date().getTime();
+    const totalMinutes = Math.max(0, Math.floor(diffMs / 60000));
+    const days = Math.floor(totalMinutes / (60 * 24));
+    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+
+    return { slot: nextSlot, date: nextDate, days, hours };
   };
 
   const getTotalWeeklyHours = (): number => {
@@ -579,6 +674,22 @@ export default function MuallimDashboardPage() {
   }
 
   const { nastavnaGodina, razredi, raspored, statistike, odabraniDan } = dashboardData;
+  const todayIsWeekend = isTodayWeekend();
+  const todayWeekendDay = getTodayWeekendDay();
+  const timeUntilWeekend = !todayIsWeekend ? getTimeUntilNextWeekend() : null;
+  const nextClassInfo = !todayIsWeekend ? getNextClassInfo() : null;
+  const effectiveSelectedDay = (selectedDay || odabraniDan) as 'subota' | 'nedjelja';
+  const allSlotsForStats = dashboardData.sviRasporedi || raspored;
+  const totalWeekendSlots = allSlotsForStats.length;
+  const totalWeekendHours = Math.round(
+    (allSlotsForStats.reduce((sum, item) => sum + item.trajanje, 0) / 60) * 10,
+  ) / 10;
+  const todaySlotsForSummary =
+    todayWeekendDay != null ? raspored.filter((item) => item.dan === todayWeekendDay) : [];
+  const pastTodaySlots = todaySlotsForSummary.filter((item) => isSlotPastToday(item));
+  const completedPastTodaySlots = pastTodaySlots.filter((item) => item.imaUnosCasa).length;
+  const allTodaySlotsCompleted =
+    pastTodaySlots.length > 0 && completedPastTodaySlots === pastTodaySlots.length;
   const progress = nastavnaGodina ? calculateProgress(nastavnaGodina.datumOd, nastavnaGodina.datumDo) : 0;
   const currentSlots = getCurrentTimeSlots(raspored);
 
@@ -621,11 +732,6 @@ export default function MuallimDashboardPage() {
                     <div className="text-xs text-gray-500 mt-1">
                       {getWeekendCount()}. vikend od početka nastavne godine
                     </div>
-                    {!isTodayWeekend() && (
-                      <div className="text-xs text-blue-600 font-medium mt-1">
-                        {getDaysUntilNextWeekend()} {getDaysUntilNextWeekend() === 1 ? 'dan' : 'dana'} do sljedećeg vikenda
-                      </div>
-                    )}
                 </div>
                 )}
               </div>
@@ -679,7 +785,7 @@ export default function MuallimDashboardPage() {
                               setSelectedSlotForDrawer(slot);
                               setShowCasDrawer(true);
                             }}
-                            className="bg-white/80 backdrop-blur-sm border border-blue-200 rounded-lg p-4 hover:bg-white hover:shadow-md transition-all text-left"
+                            className="bg-white/80 backdrop-blur-sm border border-blue-200 rounded-lg p-4 text-left cursor-pointer"
                           >
                             <div className="flex flex-col gap-2">
                               {/* Termin sa ikonicom */}
@@ -722,6 +828,103 @@ export default function MuallimDashboardPage() {
               );
             })()}
 
+            {/* Sažetak unosa za današnji vikend dan (kada nema više aktivnih časova) – samo ako fale podaci */}
+            {todayIsWeekend &&
+              currentSlots.length === 0 &&
+              todaySlotsForSummary.length > 0 &&
+              !allTodaySlotsCompleted && (
+                <div className="mb-4 w-full bg-gradient-to-br from-amber-50 via-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5 shadow-md relative overflow-hidden">
+                  <div className="absolute inset-0 bg-gradient-to-r from-amber-300/0 via-amber-300/10 to-orange-300/0 pointer-events-none" />
+                  <div className="relative z-10 flex items-center gap-2 text-sm font-semibold text-amber-800">
+                    <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 9v3m0 3h.01M12 2a10 10 0 100 20 10 10 0 000-20z"
+                      />
+                    </svg>
+                    <span>Nisu uneseni podaci za sve grupe danas.</span>
+                  </div>
+                </div>
+              )}
+
+            {/* Info banner za naredni čas i vikend statistiku (radni dani, nema LIVE časa) */}
+            {currentSlots.length === 0 && !todayIsWeekend && nextClassInfo && timeUntilWeekend && (
+              <div className="mb-4 w-full bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-5 shadow-md relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-400/0 via-indigo-400/5 to-purple-400/0 pointer-events-none" />
+                <div className="relative z-10 flex flex-col gap-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Naredni čas i vikend</span>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-blue-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">Naredni čas</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900 flex items-center gap-2 flex-wrap">
+                          <span className="inline-flex items-center">
+                            {getDayName(nextClassInfo.slot.dan)},{' '}
+                            {(() => {
+                              const d = nextClassInfo.date;
+                              const day = d.getDate();
+                              const monthNames = [
+                                'januar',
+                                'februar',
+                                'mart',
+                                'april',
+                                'maj',
+                                'jun',
+                                'jul',
+                                'avgust',
+                                'septembar',
+                                'oktobar',
+                                'novembar',
+                                'decembar',
+                              ];
+                              const month = monthNames[d.getMonth()];
+                              const year = d.getFullYear();
+                              return ` ${day}. ${month} ${year}`;
+                            })()}
+                          </span>
+                          <span className="text-slate-400">•</span>
+                          <span>{formatTime(nextClassInfo.slot.slot)}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          Za {nextClassInfo.days} {nextClassInfo.days === 1 ? 'dan' : 'dana'} i {nextClassInfo.hours}{' '}
+                          {nextClassInfo.hours === 1 ? 'sat' : 'sati'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5">
+                        <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">Vikend raspored</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">
+                          {totalWeekendSlots} čas{totalWeekendSlots === 1 ? '' : 'a'} • {totalWeekendHours} h nastave
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Calendar View - Same style as SetupNastavnaGodinaPage but single day */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                 {/* Header with day labels */}
@@ -731,40 +934,58 @@ export default function MuallimDashboardPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
-                  <div className="flex-1">
-                    <button
-                      onClick={() => setSelectedDay('subota')}
-                      className={`w-full px-6 py-4 text-sm font-medium transition-all duration-200 ${
-                        (selectedDay || odabraniDan) === 'subota'
-                          ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
-                          : 'bg-white text-gray-600 hover:bg-gray-50'
-                      }`}
-                    >
-                      <span className="flex items-center justify-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        Subota
-                      </span>
-                    </button>
-                </div>
-                  <div className="flex-1 border-l border-gray-200">
-                    <button
-                      onClick={() => setSelectedDay('nedjelja')}
-                      className={`w-full px-6 py-4 text-sm font-medium transition-all duration-200 ${
-                        (selectedDay || odabraniDan) === 'nedjelja'
-                          ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
-                          : 'bg-white text-gray-600 hover:bg-gray-50'
-                      }`}
-                    >
-                      <span className="flex items-center justify-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Nedjelja
-                      </span>
-                    </button>
-                </div>
+                  {todayWeekendDay ? (
+                    <div className="flex-1">
+                      <button
+                        onClick={() => setSelectedDay(todayWeekendDay)}
+                        className="w-full px-6 py-4 text-sm font-medium bg-blue-50 text-blue-700 border-b-2 border-b-blue-600 cursor-default"
+                      >
+                        <span className="flex items-center justify-center gap-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          {todayWeekendDay === 'subota' ? 'Subota' : 'Nedjelja'}
+                        </span>
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex-1">
+                        <button
+                          onClick={() => setSelectedDay('subota')}
+                          className={`w-full px-6 py-4 text-sm font-medium transition-all duration-200 ${
+                            (selectedDay || odabraniDan) === 'subota'
+                              ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
+                              : 'bg-white text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span className="flex items-center justify-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            Subota
+                          </span>
+                        </button>
+                      </div>
+                      <div className="flex-1 border-l border-gray-200">
+                        <button
+                          onClick={() => setSelectedDay('nedjelja')}
+                          className={`w-full px-6 py-4 text-sm font-medium transition-all duration-200 ${
+                            (selectedDay || odabraniDan) === 'nedjelja'
+                              ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
+                              : 'bg-white text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span className="flex items-center justify-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Nedjelja
+                          </span>
+                        </button>
+                      </div>
+                    </>
+                  )}
               </div>
 
                 {/* Timeline container */}
@@ -789,7 +1010,7 @@ export default function MuallimDashboardPage() {
                     })}
                   </div>
 
-                  {/* Timeline area for selected day only */}
+                  {/* Timeline area – prikaz vikend rasporeda */}
                   <div className="flex-1 relative bg-white" style={{ height: `${TIMELINE_HEIGHT}px` }}>
                     {/* Hour grid lines */}
                     {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 }, (_, i) => {
@@ -843,8 +1064,10 @@ export default function MuallimDashboardPage() {
                       return null;
             })()}
 
-                    {/* Occupied slots - with ILMIHAL colors */}
-                    {collectDaySlots(selectedDay || odabraniDan).map((slot, idx) => {
+                    {/* Occupied slots - prikaz oba dana; klik dozvoljen samo za trenutni vikend dan */}
+                    {WEEKEND_DAYS.flatMap((day) =>
+                      collectDaySlots(day).map((slot) => ({ ...slot, dan: day })),
+                    ).map((slot, idx) => {
                       const top = timeToPosition(slot.start);
                       const height = timeToPosition(slot.end) - top;
                       const isOverlap = !!slot.hasOverlap;
@@ -853,8 +1076,14 @@ export default function MuallimDashboardPage() {
                       const widthPct = 100 / columns;
                       const leftPct = widthPct * index;
                       const margin = 2;
-                      const isActive = currentSlots.some(s => s.id === slot.item.id);
+                      const isActive = currentSlots.some((s) => s.id === slot.item.id);
                       const info = getIlmihalInfo(slot.item.grupa.razred.ilmihal);
+                      const isSlotOnSelectedDay = slot.item.dan === effectiveSelectedDay;
+                      const isTodaySlot = !!todayWeekendDay && slot.item.dan === todayWeekendDay;
+                      const isPastTodaySlot = isSlotPastToday(slot.item);
+                      const canOpenDrawerForSlot =
+                        isTodaySlot && isSlotStartedToday(slot.item);
+                      const isCompletedSlot = !!slot.item.imaUnosCasa;
 
                       // Use light blue colors for all slots (like SetupNastavnaGodinaPage)
                       const getSlotStyle = () => {
@@ -862,11 +1091,21 @@ export default function MuallimDashboardPage() {
                           // Active slot - darker blue with very thin border
                           return 'bg-blue-600 border border-blue-500/30 text-white shadow-lg';
                         }
-                        
-                        // Normal slot - light blue colors
-                        return isOverlap
-                          ? 'bg-blue-100 border-[0.5px] border-blue-300 text-blue-900 shadow-sm ring-0.5 ring-blue-300/50'
-                          : 'bg-blue-50 border-[0.5px] border-blue-200 text-blue-900/90';
+
+                        // Slot za današnji vikend dan koji je prošao i nema unos – narandžasti highlight
+                        if (isTodaySlot && isPastTodaySlot && !isCompletedSlot) {
+                          return isOverlap
+                            ? 'bg-orange-50 border border-orange-300 text-orange-900 shadow-sm ring-1 ring-orange-300/60'
+                            : 'bg-orange-50 border border-orange-300 text-orange-900';
+                        }
+
+                        // Normal slot - light plava; slotovi za drugi dan su malo isprani
+                        const base =
+                          isOverlap
+                            ? 'bg-blue-100 border-[0.5px] border-blue-300 text-blue-900 shadow-sm ring-0.5 ring-blue-300/50'
+                            : 'bg-blue-50 border-[0.5px] border-blue-200 text-blue-900/90';
+
+                        return isSlotOnSelectedDay ? base : `${base} opacity-55`;
                       };
 
                       const actualWidth = `calc(${widthPct}% - ${margin * 2}px)`;
@@ -874,13 +1113,17 @@ export default function MuallimDashboardPage() {
 
                 return (
                   <button
-                          key={`slot-${selectedDay || odabraniDan}-${idx}`}
+                          key={`slot-${slot.dan}-${idx}`}
                           type="button"
                           onClick={() => {
+                            if (!canOpenDrawerForSlot) return;
                             setSelectedSlotForDrawer(slot.item);
                             setShowCasDrawer(true);
                           }}
-                          className={`absolute rounded-md border-[0.5px] ${getSlotStyle()} px-3 py-2 text-[14px] font-medium text-left`}
+                          className={`absolute rounded-md border-[0.5px] ${getSlotStyle()} px-3 py-2 text-[14px] font-medium text-left ${
+                            canOpenDrawerForSlot ? 'cursor-pointer' : ''
+                          }`}
+                          disabled={!canOpenDrawerForSlot}
                           style={{
                             top: `${top}px`,
                             height: `${Math.max(height, 34)}px`,
@@ -928,6 +1171,7 @@ export default function MuallimDashboardPage() {
                   </button>
                 );
               })}
+
             </div>
           </div>
             </div>
@@ -1049,7 +1293,7 @@ export default function MuallimDashboardPage() {
                                 const programBadges = [];
                                 if (grupa.kuran) programBadges.push('Kuran');
                                 if (grupa.sufara) programBadges.push('Sufara');
-                                const groupSlots = raspored.filter((item) => item.grupa.id === grupa.id);
+                                const groupSlots = allSlotsForStats.filter((item) => item.grupa.id === grupa.id);
                                 
                                 return (
                                   <div
