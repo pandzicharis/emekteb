@@ -333,12 +333,57 @@ export class NastavnaGodinaService {
         },
       });
 
-      // Brisanje postojećih razreda (kaskadno će obrisati grupe, rasporede i veze učenik-grupa)
-      await tx.razredNastavnaGodina.deleteMany({
+      // Provjera postojećih razreda i casova
+      const postojeciRazredi = await tx.razredNastavnaGodina.findMany({
         where: { nastavnaGodinaId: id },
+        include: {
+          razred: true,
+          cas: {
+            select: { id: true },
+            take: 1,
+          },
+          grupe: {
+            include: {
+              raspored: true,
+            },
+          },
+        },
       });
 
-      // Kreiranje novih razreda (isti kod kao u create metodi)
+      // Mapa postojećih razreda po razredId
+      const postojeciRazrediMap = new Map(
+        postojeciRazredi.map((r) => [r.razredId, r]),
+      );
+
+      // Provjera da li postoje casovi vezani za razrede koji se brišu
+      const noviRazredIds = new Set(razredi.map((r) => r.razredId));
+      const razrediKojiSeBrisu = postojeciRazredi.filter(
+        (r) => !noviRazredIds.has(r.razredId),
+      );
+
+      const razrediKojiSeBrisuSaCasovima = razrediKojiSeBrisu.filter(
+        (r) => r.cas && r.cas.length > 0,
+      );
+
+      if (razrediKojiSeBrisuSaCasovima.length > 0) {
+        const razredNazivi = razrediKojiSeBrisuSaCasovima
+          .map((r) => r.razred?.name || r.razredId)
+          .join(', ');
+        throw new BadRequestException(
+          `Ne možete ukloniti razrede (${razredNazivi}) jer postoje vezani časovi. Molimo prvo obrišite ili premjestite časove za ove razrede.`,
+        );
+      }
+
+      // Obriši razrede koji se uklanjaju (samo ako nemaju casove)
+      if (razrediKojiSeBrisu.length > 0) {
+        await tx.razredNastavnaGodina.deleteMany({
+          where: {
+            id: { in: razrediKojiSeBrisu.map((r) => r.id) },
+          },
+        });
+      }
+
+      // Ažuriranje postojećih razreda i kreiranje novih
       for (const razredDto of razredi) {
         // Validacija razreda
         const razred = await tx.razred.findUnique({
@@ -376,7 +421,7 @@ export class NastavnaGodinaService {
             },
           });
           muallimUcenikId = noviUcenik.id;
-          
+
           // Ažuriranje Korisnik zapisa da ima lozinku "password" ako nema
           const hashedPassword = await bcrypt.hash('password', 10);
           await tx.korisnik.update({
@@ -385,17 +430,43 @@ export class NastavnaGodinaService {
           });
         }
 
-        // Kreiranje RazredNastavnaGodina
-        const razredNastavnaGodina = await tx.razredNastavnaGodina.create({
-          data: {
-            nastavnaGodinaId: id,
-            razredId: razredDto.razredId,
-            muallimId: muallimUcenikId,
-            split: razredDto.split,
-          },
-        });
+        // Provjeri da li razred već postoji
+        const postojeciRazredNG = postojeciRazrediMap.get(razredDto.razredId);
+        let razredNastavnaGodina;
 
-        // Validacija i kreiranje grupa
+        if (postojeciRazredNG) {
+          // Ažuriraj postojeći razred
+          razredNastavnaGodina = await tx.razredNastavnaGodina.update({
+            where: { id: postojeciRazredNG.id },
+            data: {
+              muallimId: muallimUcenikId,
+              split: razredDto.split,
+            },
+          });
+        } else {
+          // Kreiraj novi razred
+          razredNastavnaGodina = await tx.razredNastavnaGodina.create({
+            data: {
+              nastavnaGodinaId: id,
+              razredId: razredDto.razredId,
+              muallimId: muallimUcenikId,
+              split: razredDto.split,
+            },
+          });
+        }
+
+        // Ako razred postoji, dohvati stare grupe prije brisanja (za mapiranje casova)
+        const stareGrupeMap = new Map<string, { id: string; rasporedId?: string }>();
+        if (postojeciRazredNG && postojeciRazredNG.grupe) {
+          for (const staraGrupa of postojeciRazredNG.grupe) {
+            stareGrupeMap.set(staraGrupa.naziv, {
+              id: staraGrupa.id,
+              rasporedId: staraGrupa.raspored?.id,
+            });
+          }
+        }
+
+        // Validacija i kreiranje/ažuriranje grupa
         const grupeToCreate = razredDto.split
           ? [
               { naziv: 'A', ucenici: razredDto.ucenici.grupaA },
@@ -423,26 +494,98 @@ export class NastavnaGodinaService {
             );
           }
 
-          // Kreiranje grupe
-          const grupa = await tx.grupa.create({
-            data: {
-              razredNastavnaGodinaId: razredNastavnaGodina.id,
-              naziv: grupaData.naziv,
-              kuran: postavke.kuran,
-              sufara: postavke.sufara,
-            },
-          });
+          // Provjeri da li grupa već postoji
+          const staraGrupaInfo = stareGrupeMap.get(grupaData.naziv);
+          let grupa;
+          let noviRaspored;
 
-          // Kreiranje rasporeda
-          await tx.raspored.create({
-            data: {
-              grupaId: grupa.id,
-              dan: raspored.day as DanUNedelji,
-              slot: raspored.slot,
-              lokacija: raspored.location,
-              trajanje: raspored.duration,
-            },
-          });
+          if (staraGrupaInfo) {
+            // Ažuriraj postojeću grupu
+            grupa = await tx.grupa.update({
+              where: { id: staraGrupaInfo.id },
+              data: {
+                kuran: postavke.kuran,
+                sufara: postavke.sufara,
+              },
+            });
+
+            // Ažuriraj postojeći raspored ili kreiraj novi ako ne postoji
+            if (staraGrupaInfo.rasporedId) {
+              const stariRaspored = await tx.raspored.findUnique({
+                where: { id: staraGrupaInfo.rasporedId },
+              });
+
+              // Provjeri da li se raspored promijenio
+              const rasporedSePromijenio = 
+                stariRaspored?.dan !== raspored.day ||
+                stariRaspored?.slot !== raspored.slot ||
+                stariRaspored?.lokacija !== raspored.location ||
+                stariRaspored?.trajanje !== raspored.duration;
+
+              noviRaspored = await tx.raspored.update({
+                where: { id: staraGrupaInfo.rasporedId },
+                data: {
+                  dan: raspored.day as DanUNedelji,
+                  slot: raspored.slot,
+                  lokacija: raspored.location,
+                  trajanje: raspored.duration,
+                },
+              });
+
+              // Ako se raspored promijenio, ažuriraj casove da pokazuju na novi rasporedId
+              // (rasporedId se ne mijenja, ali podaci u rasporedu se mijenjaju)
+              // Casovi su već vezani za ovaj rasporedId, tako da ne trebamo ništa mijenjati
+            } else {
+              noviRaspored = await tx.raspored.create({
+                data: {
+                  grupaId: grupa.id,
+                  dan: raspored.day as DanUNedelji,
+                  slot: raspored.slot,
+                  lokacija: raspored.location,
+                  trajanje: raspored.duration,
+                },
+              });
+
+              // Ako je kreiran novi raspored, ažuriraj casove da pokazuju na novi rasporedId
+              await tx.cas.updateMany({
+                where: {
+                  razredNastavnaGodinaId: razredNastavnaGodina.id,
+                  grupaId: grupa.id,
+                },
+                data: {
+                  rasporedId: noviRaspored.id,
+                },
+              });
+            }
+          } else {
+            // Kreiraj novu grupu
+            grupa = await tx.grupa.create({
+              data: {
+                razredNastavnaGodinaId: razredNastavnaGodina.id,
+                naziv: grupaData.naziv,
+                kuran: postavke.kuran,
+                sufara: postavke.sufara,
+              },
+            });
+
+            // Kreiraj novi raspored
+            noviRaspored = await tx.raspored.create({
+              data: {
+                grupaId: grupa.id,
+                dan: raspored.day as DanUNedelji,
+                slot: raspored.slot,
+                lokacija: raspored.location,
+                trajanje: raspored.duration,
+              },
+            });
+          }
+
+          // Ako grupa već postoji, obriši stare veze učenik-grupa za tu grupu
+          if (staraGrupaInfo) {
+            await tx.ucenikGrupa.deleteMany({
+              where: { grupaId: grupa.id },
+            });
+          }
 
           // Validacija i povezivanje učenika sa grupom
           for (const ucenikId of grupaData.ucenici) {
@@ -458,6 +601,7 @@ export class NastavnaGodinaService {
             }
 
             // Provjera da učenik nije već dodijeljen u drugoj grupi u ovoj nastavnoj godini
+            // (osim trenutne grupe koju ažuriramo)
             const existingUcenikGrupa = await tx.ucenikGrupa.findFirst({
               where: {
                 ucenikId,
@@ -465,6 +609,9 @@ export class NastavnaGodinaService {
                   razredNastavnaGodina: {
                     nastavnaGodinaId: id,
                   },
+                },
+                NOT: {
+                  grupaId: grupa.id,
                 },
               },
             });
@@ -475,11 +622,49 @@ export class NastavnaGodinaService {
               );
             }
 
-            // Kreiranje veze učenik-grupa
+            // Kreiraj vezu učenik-grupa (stare veze su već obrisane ako je grupa postojeća)
             await tx.ucenikGrupa.create({
               data: {
                 ucenikId,
                 grupaId: grupa.id,
+              },
+            });
+          }
+        }
+
+        // Ako razred postoji, obriši stare grupe koje više nisu potrebne
+        if (postojeciRazredNG && stareGrupeMap.size > 0) {
+          // Provjeri da li postoje casovi vezani za stare grupe koje nisu mapirane na nove
+          const noveGrupeNazivi = new Set(grupeToCreate.map(g => g.naziv));
+          const stareGrupeKojeSeBrisu = Array.from(stareGrupeMap.entries())
+            .filter(([naziv]) => !noveGrupeNazivi.has(naziv));
+
+          for (const [naziv, staraGrupaInfo] of stareGrupeKojeSeBrisu) {
+            // Provjeri da li postoje casovi vezani za ovu staru grupu
+            const casoviZaStaruGrupu = await tx.cas.findMany({
+              where: {
+                razredNastavnaGodinaId: razredNastavnaGodina.id,
+                grupaId: staraGrupaInfo.id,
+              },
+              take: 1,
+            });
+
+            if (casoviZaStaruGrupu.length > 0) {
+              const razredInfo = await tx.razred.findUnique({
+                where: { id: razredDto.razredId },
+              });
+              throw new BadRequestException(
+                `Ne možete ukloniti grupu "${naziv}" iz razreda "${razredInfo?.name || razredDto.razredId}" jer postoje vezani časovi. Molimo prvo obrišite ili premjestite časove za ovu grupu.`,
+              );
+            }
+          }
+
+          // Obriši samo stare grupe koje više nisu potrebne (ne postoje u novoj konfiguraciji)
+          const stareGrupeIdsKojeSeBrisu = stareGrupeKojeSeBrisu.map(([, info]) => info.id);
+          if (stareGrupeIdsKojeSeBrisu.length > 0) {
+            await tx.grupa.deleteMany({
+              where: {
+                id: { in: stareGrupeIdsKojeSeBrisu },
               },
             });
           }
@@ -585,6 +770,8 @@ export class NastavnaGodinaService {
     return nastavnaGodina;
   }
 }
+
+
 
 
 

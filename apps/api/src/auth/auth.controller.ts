@@ -1,9 +1,11 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, Logger } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(private authService: AuthService) {}
 
   @Post('login')
@@ -13,7 +15,7 @@ export class AuthController {
 
   @Post('pin')
   async loginWithPin(@Body() body: { pin: string; userId?: string }) {
-    console.log('📥 Received PIN login request:', body);
+    this.logger.debug(`📥 Received PIN login request: ${body.userId ? `userId=${body.userId}` : 'pin only'}`);
     return this.authService.loginWithPin(body.pin, body.userId);
   }
 }

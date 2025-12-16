@@ -14,6 +14,7 @@ type OcjeneState = Record<string, OcjenaRecord>;
 interface Props {
   open: boolean;
   slot: RasporedItem | null;
+  slotDate?: Date | null; // Datum za koji se unosi čas
   onClose: () => void;
   onSave?: (payload: unknown) => Promise<void> | void;
 }
@@ -26,7 +27,7 @@ const tipoviCasa: { id: TipCasa; label: string; desc: string }[] = [
   { id: 'POSEBNO', label: 'Posebna aktivnost', desc: 'Radionica, posjeta' },
 ];
 
-export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
+export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }: Props) {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,6 +39,7 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
   const [openLessonStudentId, setOpenLessonStudentId] = useState<string | null>(null);
   const lessonDropdownRef = useRef<HTMLDivElement | null>(null);
   const [gradeStudentSearch, setGradeStudentSearch] = useState('');
+  const [existingCasId, setExistingCasId] = useState<string | null>(null);
   const [casFormData, setCasFormData] = useState<{
     tipoviCasa: TipCasa[];
     lekcije: string[];
@@ -52,21 +54,49 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
     ocjene: {},
   });
 
-  // Fetch lessons & students when slot changes
+  // Fetch lessons & students when slot changes, and load existing cas if available
   useEffect(() => {
     if (!open || !slot) return;
     const run = async () => {
       setLoading(true);
       try {
         const razredId = slot.grupa.razred.id;
-        const [lessonsRes] = await Promise.all([
+        
+        // Učitaj lekcije i postojeći čas (ako postoji) paralelno
+        const promises: Promise<any>[] = [
           axios.get<Lesson[]>(`${API_URL}/lekcije`, { params: { razredId } }),
-        ]);
+        ];
+        
+        // Koristi slotDate ako je dostupan, inače koristi današnji datum
+        const dateForCas = slotDate ? new Date(slotDate) : new Date();
+        dateForCas.setHours(0, 0, 0, 0);
+        
+        // Formatiraj datum za API poziv (YYYY-MM-DD format)
+        const formatDateForQuery = (date: Date): string => {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+        
+        // Ako slot ima trenutniCasId, učitaj postojeći čas
+        if (slot.trenutniCasId) {
+          promises.push(axios.get(`${API_URL}/cas/${slot.trenutniCasId}`));
+        } else {
+          // Pokušaj da nađeš čas po slotId i datumu
+          promises.push(
+            axios.get(`${API_URL}/cas/slot/${slot.id}`, {
+              params: { datum: formatDateForQuery(dateForCas) },
+            }).catch(() => null) // Ignoriši grešku ako ne postoji
+          );
+        }
+        
+        const [lessonsRes, existingCasRes] = await Promise.all(promises);
 
         // Dedup lekcije po ID-u – ako backend vrati duplikate, čuvamo samo prvi zapis
         const rawLessons = lessonsRes.data ?? [];
         const lessonsById = new Map<string, Lesson>();
-        rawLessons.forEach((l) => {
+        rawLessons.forEach((l: Lesson) => {
           if (!l?.id) return;
           if (!lessonsById.has(l.id)) {
             lessonsById.set(l.id, l);
@@ -81,7 +111,7 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
             godinaRodjenja: u.godinaRodjenja ?? null,
           })) ?? [];
 
-        // Prisustvo inicijalno: svi označeni kao odsutni (NEOPRAVDAN)
+        // Inicijalizuj podrazumijevane vrednosti
         const defaultPresence: Record<string, PrisustvoStatus> = {};
         fetchedStudents.forEach((s) => {
           defaultPresence[s.id] = 'NEOPRAVDAN';
@@ -95,24 +125,76 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
           });
         });
 
-        setLessons(fetchedLessons);
-        setStudents(fetchedStudents);
-        // Podrazumijevana lekcija za ocjenjivanje po učeniku: ništa nije unaprijed odabrano
         const defaultSelectedLessons: Record<string, string | null> = {};
         const defaultLessonInputs: Record<string, string> = {};
         fetchedStudents.forEach((s) => {
           defaultSelectedLessons[s.id] = null;
           defaultLessonInputs[s.id] = '';
         });
-        setCasFormData({
-          tipoviCasa: ['LEKCIJA'],
-          lekcije: [],
+
+        // Ako postoji postojeći čas, popuni formu sa njegovim podacima
+        const initialFormData = {
+          tipoviCasa: ['LEKCIJA'] as TipCasa[],
+          lekcije: [] as string[],
           napomena: '',
           prisutnost: defaultPresence,
           ocjene: defaultGrades,
-        });
-        setSelectedLessonByStudent(defaultSelectedLessons);
-        setLessonInputByStudent(defaultLessonInputs);
+        };
+        
+        const initialSelectedLessons = defaultSelectedLessons;
+        const initialLessonInputs = defaultLessonInputs;
+        let casId: string | null = null;
+
+        if (existingCasRes?.data) {
+          const cas = existingCasRes.data;
+          casId = cas.id;
+          
+          // Popuni tipove časa
+          initialFormData.tipoviCasa = (cas.tipovi || []) as TipCasa[];
+          
+          // Popuni lekcije
+          initialFormData.lekcije = (cas.lekcije || []).map((cl: any) => cl.lekcija?.id || cl.lekcijaId).filter(Boolean);
+          
+          // Popuni napomenu
+          initialFormData.napomena = cas.napomena || '';
+          
+          // Popuni prisustvo
+          const presence: Record<string, PrisustvoStatus> = {};
+          (cas.prisustva || []).forEach((p: any) => {
+            const ucenikId = p.ucenik?.id || p.ucenikId;
+            if (ucenikId) {
+              presence[ucenikId] = (p.status || 'NEOPRAVDAN') as PrisustvoStatus;
+            }
+          });
+          initialFormData.prisutnost = { ...defaultPresence, ...presence };
+          
+          // Popuni ocjene
+          const grades: OcjeneState = {};
+          fetchedLessons.forEach((lesson) => {
+            grades[lesson.id] = {};
+            fetchedStudents.forEach((s) => {
+              grades[lesson.id][s.id] = { ocjena: null, komentar: '' };
+            });
+          });
+          (cas.ocjene || []).forEach((o: any) => {
+            const lekcijaId = o.lekcija?.id || o.lekcijaId;
+            const ucenikId = o.ucenik?.id || o.ucenikId;
+            if (lekcijaId && ucenikId && grades[lekcijaId]) {
+              grades[lekcijaId][ucenikId] = {
+                ocjena: o.ocjena ?? null,
+                komentar: o.komentar || '',
+              };
+            }
+          });
+          initialFormData.ocjene = grades;
+        }
+
+        setLessons(fetchedLessons);
+        setStudents(fetchedStudents);
+        setExistingCasId(casId);
+        setCasFormData(initialFormData);
+        setSelectedLessonByStudent(initialSelectedLessons);
+        setLessonInputByStudent(initialLessonInputs);
       } catch (err) {
         console.error('Greška pri učitavanju podataka za čas', err);
       } finally {
@@ -120,7 +202,7 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
       }
     };
     run();
-  }, [open, slot]);
+  }, [open, slot, slotDate]);
 
   // Zatvori dropdown za lekciju kada se klikne izvan njega
   useEffect(() => {
@@ -320,17 +402,59 @@ export default function CasEntryDrawer({ open, slot, onClose, onSave }: Props) {
   };
 
   const handleSave = async () => {
-    if (!payloadPreview) return;
+    if (!payloadPreview || !slot) return;
     setSaving(true);
     try {
-      if (onSave) {
-        await onSave(payloadPreview);
+      // Koristi slotDate ako je dostupan (datum iz filtera), inače koristi današnji datum
+      const dateForCas = slotDate ? new Date(slotDate) : new Date();
+      dateForCas.setHours(0, 0, 0, 0);
+      
+      console.log('CasEntryDrawer handleSave:', {
+        slotDate,
+        dateForCas: dateForCas.toISOString(),
+        dateForCasLocal: `${dateForCas.getFullYear()}-${String(dateForCas.getMonth() + 1).padStart(2, '0')}-${String(dateForCas.getDate()).padStart(2, '0')}`,
+      });
+      
+      // Formatiraj datum kao ISO string - backend očekuje ISO format koji može parsirati
+      // Koristimo UTC vrijeme na ponoć da izbjegnemo probleme s vremenskom zonom
+      const formatDateForAPI = (date: Date): string => {
+        // Kreiraj UTC datum na ponoć
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        const day = date.getDate();
+        const utcDate = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+        // Vrati kao ISO string - backend će ga parsirati
+        return utcDate.toISOString();
+      };
+      
+      const formattedDate = formatDateForAPI(dateForCas);
+      console.log('Formatted date for API:', formattedDate);
+      
+      const payload = {
+        ...payloadPreview,
+        datum: formattedDate,
+      };
+      
+      console.log('Payload being sent:', payload);
+
+      // Uvijek pozovi API direktno (axios interceptor će automatski dodati token)
+      if (existingCasId) {
+        // Ažuriraj postojeći čas
+        await axios.put(`${API_URL}/cas/${existingCasId}`, payload);
       } else {
-        console.log('📤 Payload za backend', payloadPreview);
+        // Kreiraj novi čas
+        await axios.post(`${API_URL}/cas`, payload);
       }
+      
+      // Ako postoji callback, pozovi ga nakon uspješnog spremanja
+      if (onSave) {
+        await onSave(payload);
+      }
+      
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Greška pri spremanju časa', err);
+      alert(err.response?.data?.message || 'Greška pri spremanju časa. Molimo pokušajte ponovo.');
     } finally {
       setSaving(false);
     }

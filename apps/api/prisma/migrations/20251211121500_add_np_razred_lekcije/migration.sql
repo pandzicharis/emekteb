@@ -19,3 +19,4 @@ ALTER TABLE "nastavni_plan_razred_lekcije" ADD CONSTRAINT "nastavni_plan_razred_
 
 
 
+

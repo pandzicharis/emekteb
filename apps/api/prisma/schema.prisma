@@ -8,6 +8,7 @@ generator client {
 
 datasource db {
     provider = "postgresql"
+    // url      = "postgresql://postgres:postgres@localhost:5439/emekteb?schema=public"
     url      = env("DATABASE_URL")
 }
 
@@ -93,6 +94,8 @@ model Ucenik {
     kontakti              Kontakt[]
     grupe                 UcenikGrupa[]
     razrediNastavneGodine RazredNastavnaGodina[]
+    casPrisustvos         CasPrisustvo[]
+    casOcjenas            CasOcjena[]
 
     @@map("ucenici")
 }
@@ -260,6 +263,8 @@ model Lekcija {
 
     razredi          RazredLekcija[]
     nastavnihPlanova NastavniPlanRazredLekcija[]
+    casLekcijas      CasLekcija[]
+    casOcjenas       CasOcjena[]
 
     @@map("lekcije")
 }
@@ -349,6 +354,7 @@ model NastavnaGodina {
     // Relacije
     nastavniPlan NastavniPlan           @relation(fields: [nastavniPlanId], references: [id], onDelete: Restrict)
     razredi      RazredNastavnaGodina[]
+    cas          Cas[]
 
     @@map("nastavne_godine")
 }
@@ -367,6 +373,7 @@ model RazredNastavnaGodina {
     razred         Razred         @relation(fields: [razredId], references: [id], onDelete: Restrict)
     muallim        Ucenik         @relation(fields: [muallimId], references: [id], onDelete: Restrict)
     grupe          Grupa[]
+    cas            Cas[]
 
     // Constraint: jedan razred može biti samo jednom u jednoj nastavnoj godini u istom trenutku
     @@unique([nastavnaGodinaId, razredId])
@@ -386,6 +393,7 @@ model Grupa {
     razredNastavnaGodina RazredNastavnaGodina @relation(fields: [razredNastavnaGodinaId], references: [id], onDelete: Cascade)
     raspored             Raspored?
     ucenici              UcenikGrupa[]
+    cas                  Cas[]
 
     @@unique([razredNastavnaGodinaId, naziv])
     @@map("grupe")
@@ -402,7 +410,8 @@ model Raspored {
     azuriran DateTime    @updatedAt
 
     // Relacije
-    grupa Grupa @relation(fields: [grupaId], references: [id], onDelete: Cascade)
+    grupa  Grupa @relation(fields: [grupaId], references: [id], onDelete: Cascade)
+    casovi Cas[]
 
     @@map("rasporedi")
 }
@@ -421,4 +430,90 @@ model UcenikGrupa {
     // Constraint: jedan učenik može biti samo u jednoj grupi unutar jedne nastavne godine
     @@unique([ucenikId, grupaId])
     @@map("ucenik_grupa")
+}
+
+// ============================================
+// ČASOVI, PRISUSTVO I OCJENE
+// ============================================
+
+enum TipCasa {
+    LEKCIJA
+    PROVJERA
+    POSEBNO
+}
+
+enum StatusPrisustva {
+    PRISUTAN
+    OPRAVDAN
+    NEOPRAVDAN
+}
+
+model Cas {
+    id                     String    @id @default(uuid())
+    nastavnaGodinaId       String
+    razredNastavnaGodinaId String
+    grupaId                String
+    rasporedId             String
+    datum                  DateTime
+    tipovi                 TipCasa[]
+    napomena               String?
+    kreiran                DateTime  @default(now())
+    azuriran               DateTime  @updatedAt
+
+    // Relacije
+    nastavnaGodina       NastavnaGodina       @relation(fields: [nastavnaGodinaId], references: [id], onDelete: Restrict)
+    razredNastavnaGodina RazredNastavnaGodina @relation(fields: [razredNastavnaGodinaId], references: [id], onDelete: Restrict)
+    grupa                Grupa                @relation(fields: [grupaId], references: [id], onDelete: Restrict)
+    raspored             Raspored             @relation(fields: [rasporedId], references: [id], onDelete: Restrict)
+
+    lekcije   CasLekcija[]
+    prisustva CasPrisustvo[]
+    ocjene    CasOcjena[]
+
+    @@map("casovi")
+}
+
+model CasLekcija {
+    id        String @id @default(uuid())
+    casId     String
+    lekcijaId String
+
+    cas     Cas     @relation(fields: [casId], references: [id], onDelete: Cascade)
+    lekcija Lekcija @relation(fields: [lekcijaId], references: [id], onDelete: Restrict)
+
+    @@unique([casId, lekcijaId])
+    @@map("cas_lekcije")
+}
+
+model CasPrisustvo {
+    id       String          @id @default(uuid())
+    casId    String
+    ucenikId String
+    status   StatusPrisustva
+    napomena String?
+    kreiran  DateTime        @default(now())
+    azuriran DateTime        @updatedAt
+
+    cas    Cas    @relation(fields: [casId], references: [id], onDelete: Cascade)
+    ucenik Ucenik @relation(fields: [ucenikId], references: [id], onDelete: Restrict)
+
+    @@unique([casId, ucenikId])
+    @@map("cas_prisustva")
+}
+
+model CasOcjena {
+    id        String   @id @default(uuid())
+    casId     String
+    ucenikId  String
+    lekcijaId String
+    ocjena    Int
+    komentar  String?
+    vrijeme   DateTime @default(now())
+
+    cas     Cas     @relation(fields: [casId], references: [id], onDelete: Cascade)
+    ucenik  Ucenik  @relation(fields: [ucenikId], references: [id], onDelete: Restrict)
+    lekcija Lekcija @relation(fields: [lekcijaId], references: [id], onDelete: Restrict)
+
+    @@unique([casId, ucenikId, lekcijaId])
+    @@map("cas_ocjene")
 }

@@ -288,7 +288,7 @@ export class MuallimService {
     return photoUrl;
   }
 
-  async getDashboardData(korisnikId: string, selectedDay?: 'subota' | 'nedjelja') {
+  async getDashboardData(korisnikId: string, selectedDay?: 'subota' | 'nedjelja', datumFilter?: string) {
     if (!korisnikId) {
       throw new BadRequestException('Korisnik ID je obavezan');
     }
@@ -323,8 +323,26 @@ export class MuallimService {
       });
       muallimUcenikId = noviUcenik.id;
     }
+    // Datum filter – ako je proslijeđen, koristimo taj dan, inače današnji
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    let filterStart = new Date(today);
+    let filterEnd = new Date(today);
+    filterEnd.setDate(filterEnd.getDate() + 1);
+
+    let derivedDay: 'subota' | 'nedjelja' | null = null;
+    if (datumFilter) {
+      const d = new Date(datumFilter);
+      if (!isNaN(d.getTime())) {
+        filterStart = new Date(d);
+        filterStart.setHours(0, 0, 0, 0);
+        filterEnd = new Date(filterStart);
+        filterEnd.setDate(filterEnd.getDate() + 1);
+        const day = filterStart.getDay();
+        if (day === 6) derivedDay = 'subota';
+        if (day === 0) derivedDay = 'nedjelja';
+      }
+    }
 
     // Pronađi aktivnu nastavnu godinu gdje je danasnji datum između datumOd i datumDo
     const nastavnaGodina = await this.prisma.nastavnaGodina.findFirst({
@@ -414,11 +432,16 @@ export class MuallimService {
     });
 
     // Odredi dan za raspored (subota ili nedjelja)
-    // Ako je selectedDay proslijeđen, koristi ga, inače koristi trenutni dan
+    // Prioritet: selectedDay (eksplicitno odabran) -> derivedDay (iz datuma) -> današnji vikend dan
     let danZaRaspored: 'subota' | 'nedjelja';
     if (selectedDay) {
+      // Ako je eksplicitno poslan dan parametar, koristi ga (korisnik je odabrao dan u picker-u)
       danZaRaspored = selectedDay;
+    } else if (derivedDay) {
+      // Ako nije poslan dan, ali je poslan datum, koristi dan iz datuma
+      danZaRaspored = derivedDay;
     } else {
+      // Inače, koristi današnji vikend dan
       const dayOfWeek = today.getDay(); // 0 = nedjelja, 6 = subota
       danZaRaspored = dayOfWeek === 6 ? 'subota' : 'nedjelja';
     }
@@ -472,6 +495,41 @@ export class MuallimService {
       },
     });
 
+    // Pronađi časove za ove rasporede – za izabrani datum (ili današnji)
+    // kako bismo označili slotove (imaUnosCasa) i uzeli zadnji unos za taj dan.
+    const rasporedIds = sviRasporedi.map((r) => r.id);
+    let completedRasporediIds = new Set<string>();
+    let casIdByRaspored = new Map<string, string>();
+
+    if (rasporedIds.length > 0) {
+      const casovi = await this.prisma.cas.findMany({
+        where: {
+          rasporedId: { in: rasporedIds },
+          datum: {
+            gte: filterStart,
+            lt: filterEnd,
+          },
+        },
+        select: {
+          id: true,
+          rasporedId: true,
+          datum: true,
+        },
+        orderBy: {
+          datum: 'desc',
+        },
+      });
+
+      completedRasporediIds = new Set(casovi.map((c) => c.rasporedId));
+
+      // Mapiranje rasporeda na ID ZADNJEG časa (po datumu) za taj slot u filter opsegu
+      casovi.forEach((c) => {
+        if (!casIdByRaspored.has(c.rasporedId)) {
+          casIdByRaspored.set(c.rasporedId, c.id);
+        }
+      });
+    }
+
     // Helper funkcija za mapiranje rasporeda
     const mapRaspored = (r: any) => {
       const [hours, minutes] = r.slot.split(':').map(Number);
@@ -496,7 +554,9 @@ export class MuallimService {
           brojUcenika: r.grupa.ucenici.length,
           // Lista učenika u ovoj grupi (za prisustvo u CasEntryDrawer-u)
           ucenici: r.grupa.ucenici.map((ug: any) => ({
-            id: ug.ucenik.korisnik?.id ?? ug.ucenik.id,
+            // Za backend za časove i ocjene nam je bitan uvijek stabilan ID učenika,
+            // zato uvijek koristimo ID iz tabele "ucenici"
+            id: ug.ucenik.id,
             ime: ug.ucenik.korisnik?.ime ?? '',
             prezime: ug.ucenik.korisnik?.prezime ?? '',
             godinaRodjenja: ug.ucenik.datumRodjenja
@@ -510,6 +570,10 @@ export class MuallimService {
         trajanje: r.trajanje,
         startTime: startTime.toISOString(),
         endTime: endTime.toISOString(),
+        // Frontend koristi ovaj flag da vizuelno označi slotove za koje je čas već unesen
+        imaUnosCasa: completedRasporediIds.has(r.id),
+        // ID časa za današnji datum (ako postoji) – olakšava dohvat detalja časa iz kalendara
+        trenutniCasId: casIdByRaspored?.get(r.id) ?? null,
       };
     };
 

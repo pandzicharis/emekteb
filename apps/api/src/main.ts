@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { Logger } from '@nestjs/common';
 import { join } from 'path';
 
 // Set default DATABASE_URL if not provided
@@ -9,7 +10,11 @@ if (!process.env['DATABASE_URL']) {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const logger = new Logger('Bootstrap');
+  
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+  });
   
   // Enable CORS for frontend
   app.enableCors({
@@ -25,7 +30,7 @@ async function bootstrap() {
   const port = process.env['PORT'] || 3000;
   await app.listen(port);
   
-  console.log(`🚀 API server is running on: http://localhost:${port}`);
+  logger.log(`🚀 API server is running on: http://localhost:${port}`);
 }
 
 bootstrap();

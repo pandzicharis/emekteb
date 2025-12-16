@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { compare } from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,6 +7,8 @@ import { JwtPayload } from './types/jwt-payload.interface';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -60,7 +62,7 @@ export class AuthService {
   }
 
   async loginWithPin(pin: string, userId?: string) {
-    console.log('🔐 loginWithPin called with:', { pin, userId });
+    this.logger.debug(`🔐 loginWithPin called with: ${userId ? `userId=${userId}` : 'pin only'}`);
     
     // Ako je userId proslijeđen, provjeri i PIN i ID
     // Ako nije, koristi samo PIN (fallback za kompatibilnost)
@@ -68,13 +70,17 @@ export class AuthService {
       ? { id: userId, pin: pin }
       : { pin: pin };
     
-    console.log('🔍 Searching for user with:', whereClause);
+    this.logger.debug(`🔍 Searching for user with: ${JSON.stringify(whereClause)}`);
     
     const user = await this.prisma.korisnik.findFirst({
       where: whereClause,
     });
 
-    console.log('👤 User found:', user ? { id: user.id, ime: user.ime, prezime: user.prezime, pin: user.pin } : 'null');
+    if (user) {
+      this.logger.log(`👤 User found: ${user.id} (${user.ime} ${user.prezime})`);
+    } else {
+      this.logger.warn(`👤 User not found for PIN login`);
+    }
 
     if (!user) {
       throw new UnauthorizedException('Neispravan PIN ili korisnik');

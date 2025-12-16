@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import CasEntryDrawer from '../components/CasEntryDrawer';
+import WeekendDatePicker from '../components/WeekendDatePicker';
 import { RasporedItem } from '../types/raspored';
 
 const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
@@ -69,14 +70,15 @@ export default function MuallimDashboardPage() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Postavi selectedDay na osnovu dana u sedmici ako je vikend
+  // Postavi selectedDay na najbližu narednu subotu
   const [selectedDay, setSelectedDay] = useState<'subota' | 'nedjelja' | null>(() => {
     const today = new Date();
     const day = today.getDay();
-    if (day === 0 || day === 6) { // 0 = nedjelja, 6 = subota
-      return day === 0 ? 'nedjelja' : 'subota';
-    }
-    return null;
+    // Ako je danas subota (6) ili nedjelja (0), koristi taj dan
+    if (day === 6) return 'subota';
+    if (day === 0) return 'nedjelja';
+    // Inače, postavi na najbližu narednu subotu
+    return 'subota';
   });
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -89,15 +91,147 @@ export default function MuallimDashboardPage() {
   }, []);
   const [showCasDrawer, setShowCasDrawer] = useState(false);
   const [selectedSlotForDrawer, setSelectedSlotForDrawer] = useState<RasporedItem | null>(null);
+  const [selectedSlotDate, setSelectedSlotDate] = useState<Date | null>(null);
+  // Postavi defaultni datum na danasnji ako je vikend
+  const [selectedWeekendDate, setSelectedWeekendDate] = useState<Date | null>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const day = today.getDay();
+    if (day === 6 || day === 0) {
+      return today;
+    }
+    return null;
+  });
+  // Mapa za čuvanje informacije o casovima: key = `${slotId}-${datumISO}`, value = boolean
+  const [casExistsMap, setCasExistsMap] = useState<Map<string, boolean>>(new Map());
+  // Mapa za čuvanje broja časova po datumu: key = `YYYY-MM-DD`, value = { total, completed }
+  const [casoviCounts, setCasoviCounts] = useState<Record<string, { total: number; completed: number }>>({});
+  
+  // Provjeri postojanje časa za sve slotove kada se promijeni datum ili dashboardData
+  useEffect(() => {
+    if (!dashboardData) {
+      setCasExistsMap(new Map());
+      return;
+    }
+
+    const checkCasExists = async () => {
+      const newMap = new Map<string, boolean>();
+      
+      // Provjeri za sve slotove u dashboardData (raspored je array)
+      const allSlots = dashboardData.raspored || [];
+
+      // Grupiraj slotove po danu da provjerimo za oba datuma
+      const slotsByDay = {
+        subota: allSlots.filter((s: RasporedItem) => s.dan === 'subota'),
+        nedjelja: allSlots.filter((s: RasporedItem) => s.dan === 'nedjelja'),
+      };
+
+      // Izračunaj datume za subotu i nedjelju - koristi tačan datum sa pickera
+      let saturdayDate: Date;
+      let sundayDate: Date;
+      
+      if (selectedWeekendDate) {
+        const selectedDayOfWeek = selectedWeekendDate.getDay();
+        if (selectedDayOfWeek === 6) {
+          // Odabrana je subota - koristi tačan datum
+          saturdayDate = new Date(selectedWeekendDate);
+          saturdayDate.setHours(0, 0, 0, 0);
+          sundayDate = new Date(selectedWeekendDate);
+          sundayDate.setDate(sundayDate.getDate() + 1);
+          sundayDate.setHours(0, 0, 0, 0);
+        } else if (selectedDayOfWeek === 0) {
+          // Odabrana je nedjelja - koristi tačan datum
+          sundayDate = new Date(selectedWeekendDate);
+          sundayDate.setHours(0, 0, 0, 0);
+          saturdayDate = new Date(selectedWeekendDate);
+          saturdayDate.setDate(saturdayDate.getDate() - 1);
+          saturdayDate.setHours(0, 0, 0, 0);
+        } else {
+          // Fallback
+          saturdayDate = getSlotDate('subota');
+          sundayDate = getSlotDate('nedjelja');
+        }
+      } else {
+        saturdayDate = getSlotDate('subota');
+        sundayDate = getSlotDate('nedjelja');
+      }
+
+      const promises: Promise<void>[] = [];
+
+      // Helper funkcija za formatiranje datuma bez vremenske zone problema
+      const formatDateForAPI = (date: Date): string => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
+      // Provjeri za slotove subote
+      slotsByDay.subota.forEach((slot: RasporedItem) => {
+        const dateISO = formatDateForAPI(saturdayDate);
+        promises.push(
+          axios.get(`${API_URL}/cas/slot/${slot.id}`, {
+            params: { datum: dateISO },
+          })
+            .then((response) => {
+              const key = `${slot.id}-${dateISO}`;
+              newMap.set(key, !!response.data);
+            })
+            .catch(() => {
+              const key = `${slot.id}-${dateISO}`;
+              newMap.set(key, false);
+            })
+        );
+      });
+
+      // Provjeri za slotove nedjelje
+      slotsByDay.nedjelja.forEach((slot: RasporedItem) => {
+        const dateISO = formatDateForAPI(sundayDate);
+        promises.push(
+          axios.get(`${API_URL}/cas/slot/${slot.id}`, {
+            params: { datum: dateISO },
+          })
+            .then((response) => {
+              const key = `${slot.id}-${dateISO}`;
+              newMap.set(key, !!response.data);
+            })
+            .catch(() => {
+              const key = `${slot.id}-${dateISO}`;
+              newMap.set(key, false);
+            })
+        );
+      });
+
+      await Promise.all(promises);
+      setCasExistsMap(newMap);
+    };
+
+    checkCasExists();
+  }, [dashboardData, selectedWeekendDate]);
 
   const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const params = selectedDay ? { dan: selectedDay } : {};
+      const params: { dan?: string; datum?: string } = {};
+      
+      // Ako je odabran konkretan datum, šalji datum i dan
+      if (selectedWeekendDate) {
+        const dateStr = selectedWeekendDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+        params.datum = dateStr;
+        // Uvijek šalji dan na osnovu odabranog datuma
+        const dayOfWeek = selectedWeekendDate.getDay();
+        params.dan = dayOfWeek === 6 ? 'subota' : dayOfWeek === 0 ? 'nedjelja' : (selectedDay || 'subota');
+      } else if (selectedDay) {
+        // Inače, šalji samo dan
+        params.dan = selectedDay;
+      }
+      
       const response = await axios.get(`${API_URL}/muallimi/dashboard`, { params });
       // Debug: ispiši šta dolazi iz baze
       console.log('Dashboard data:', response.data);
+      console.log('Params sent:', params);
+      console.log('Raspored items:', response.data?.raspored?.length || 0);
       if (response.data?.razredi) {
         response.data.razredi.forEach((r: any) => {
           console.log(`Razred ${r.razred?.name}: ilmihal = "${r.razred?.ilmihal}" (type: ${typeof r.razred?.ilmihal})`);
@@ -110,11 +244,11 @@ export default function MuallimDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedDay]);
+  }, [selectedDay, selectedWeekendDate]);
 
-  // Učitaj podatke kada je user dostupan (nakon login-a ili refresh-a) ili kada se promijeni selectedDay
+  // Učitaj podatke kada je user dostupan (nakon login-a ili refresh-a) ili kada se promijeni selectedDay ili selectedWeekendDate
   useEffect(() => {
-    console.log('MuallimDashboardPage useEffect:', { authLoading, user: user?.id, selectedDay, dashboardData: !!dashboardData });
+    console.log('MuallimDashboardPage useEffect:', { authLoading, user: user?.id, selectedDay, selectedWeekendDate, dashboardData: !!dashboardData });
     // Učitaj podatke ako:
     // 1. User je dostupan i authLoading je false
     // 2. DashboardData nije postavljen (npr. nakon refresh-a)
@@ -126,7 +260,36 @@ export default function MuallimDashboardPage() {
     } else if (authLoading) {
       console.log('Auth still loading, waiting...');
     }
-  }, [selectedDay, user, authLoading, fetchDashboardData]);
+  }, [selectedDay, selectedWeekendDate, user, authLoading, fetchDashboardData]);
+
+  // Dohvati broj časova po datumu kada je dashboardData dostupan
+  useEffect(() => {
+    const fetchCasoviCounts = async () => {
+      if (!dashboardData?.nastavnaGodina || !user) {
+        setCasoviCounts({});
+        return;
+      }
+
+      try {
+        // Pronađi muallim ID iz user objekta (trebamo ucenik ID)
+        // Za sada koristimo user.id, ali možda treba pronaći ucenik ID
+        // Pretpostavljamo da user ima ucenik relaciju ili možemo koristiti user.id direktno
+        const response = await axios.get(`${API_URL}/cas/counts/by-date`, {
+          params: {
+            nastavnaGodinaId: dashboardData.nastavnaGodina.id,
+            startDate: dashboardData.nastavnaGodina.datumOd,
+            endDate: dashboardData.nastavnaGodina.datumDo,
+          },
+        });
+        setCasoviCounts(response.data || {});
+      } catch (err: any) {
+        console.error('Error fetching casovi counts:', err);
+        setCasoviCounts({});
+      }
+    };
+
+    fetchCasoviCounts();
+  }, [dashboardData, user]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -230,7 +393,8 @@ export default function MuallimDashboardPage() {
         const info = getIlmihalInfo(item.grupa.razred.ilmihal);
         const startMin = timeToMinutes(item.slot);
         const endMin = startMin + item.trajanje;
-        const label = `${item.grupa.razred.name}${item.grupa.naziv !== 'A' ? ` • Grupa ${item.grupa.naziv}` : ''}`;
+        const grupaLabel = item.grupa.naziv === 'A' ? 'Grupa 1' : item.grupa.naziv === 'B' ? 'Grupa 2' : `Grupa ${item.grupa.naziv}`;
+        const label = `${item.grupa.razred.name} • ${grupaLabel}`;
         
         slots.push({
           start: item.slot,
@@ -429,6 +593,42 @@ export default function MuallimDashboardPage() {
     return null;
   };
 
+  const getSlotDate = (dan: 'subota' | 'nedjelja'): Date => {
+    const today = new Date();
+    const currentDay = today.getDay();
+    const targetDay = dan === 'subota' ? 6 : 0; // 6 = subota, 0 = nedjelja
+    
+    // Ako je danas taj dan, vrati danas
+    if (currentDay === targetDay) {
+      return new Date(today);
+    }
+    
+    // Izračunaj najbližu narednu subotu ili nedjelju
+    const date = new Date(today);
+    let daysUntilTarget = targetDay - currentDay;
+    
+    // Ako je target dan prošao ovu sedmicu, dodaj 7 dana
+    if (daysUntilTarget <= 0) {
+      daysUntilTarget += 7;
+    }
+    
+    date.setDate(date.getDate() + daysUntilTarget);
+    return date;
+  };
+
+  const formatSlotDate = (date: Date): string => {
+    const day = date.getDate();
+    const monthNames = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'avg', 'sep', 'okt', 'nov', 'dec'];
+    const month = monthNames[date.getMonth()];
+    return `${day}. ${month}`;
+  };
+
+  const formatSlotDayName = (date: Date): string => {
+    const dayOfWeek = date.getDay();
+    return dayOfWeek === 6 ? 'Subota' : dayOfWeek === 0 ? 'Nedjelja' : '';
+  };
+
+
   const getCurrentTimeSlots = (raspored: RasporedItem[]) => {
     if (!isTodayWeekend()) return [];
     
@@ -488,6 +688,18 @@ export default function MuallimDashboardPage() {
     return now > endTime;
   };
 
+  // Provjeri da li je slot prošao na osnovu datuma
+  const isSlotPast = (item: RasporedItem, slotDate: Date): boolean => {
+    const now = new Date();
+    const [hours, minutes] = item.slot.split(':').map(Number);
+    const slotDateTime = new Date(slotDate);
+    slotDateTime.setHours(hours, minutes, 0, 0);
+    const endTime = new Date(slotDateTime);
+    endTime.setMinutes(endTime.getMinutes() + item.trajanje);
+
+    return now > endTime;
+  };
+
   const getWeekendCount = (): number => {
     if (!nastavnaGodina) return 0;
     
@@ -497,7 +709,30 @@ export default function MuallimDashboardPage() {
     end.setHours(23, 59, 59, 999);
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    const checkDate = now < end ? now : end;
+    
+    // Izračunaj datum do kojeg treba računati - do trenutnog vikenda
+    let checkDate = new Date(now);
+    const currentDay = now.getDay();
+    
+    // Ako je danas subota (6) ili nedjelja (0), koristi danas
+    // Ako nije vikend, idi na prošlu nedjelju (kraj prošlog vikenda)
+    if (currentDay === 6) {
+      // Subota - koristi danas
+      checkDate = new Date(now);
+    } else if (currentDay === 0) {
+      // Nedjelja - koristi danas
+      checkDate = new Date(now);
+    } else {
+      // Nije vikend - idi na prošlu nedjelju
+      const daysToLastSunday = currentDay; // 1 = ponedjeljak -> 1 dan unazad, 2 = utorak -> 2 dana unazad, itd.
+      checkDate = new Date(now);
+      checkDate.setDate(checkDate.getDate() - daysToLastSunday);
+    }
+    
+    // Ne računaj dalje od kraja nastavne godine
+    if (checkDate > end) {
+      checkDate = end;
+    }
     
     let count = 0;
     const currentDate = new Date(start);
@@ -678,7 +913,8 @@ export default function MuallimDashboardPage() {
   const todayWeekendDay = getTodayWeekendDay();
   const timeUntilWeekend = !todayIsWeekend ? getTimeUntilNextWeekend() : null;
   const nextClassInfo = !todayIsWeekend ? getNextClassInfo() : null;
-  const effectiveSelectedDay = (selectedDay || odabraniDan) as 'subota' | 'nedjelja';
+  // Ako je odabran datum u picker-u, koristi selectedDay, inače koristi odabraniDan iz backend-a
+  const effectiveSelectedDay = (selectedWeekendDate ? selectedDay : (selectedDay || odabraniDan)) as 'subota' | 'nedjelja';
   const allSlotsForStats = dashboardData.sviRasporedi || raspored;
   const totalWeekendSlots = allSlotsForStats.length;
   const totalWeekendHours = Math.round(
@@ -728,9 +964,6 @@ export default function MuallimDashboardPage() {
                         const weekday = weekdayNames[now.getDay()];
                         return `${day}. ${month} ${year}, ${weekday}`;
                       })()}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {getWeekendCount()}. vikend od početka nastavne godine
                     </div>
                 </div>
                 )}
@@ -925,6 +1158,74 @@ export default function MuallimDashboardPage() {
               </div>
             )}
 
+            {/* Weekend Date Picker - pretraga po vikendima */}
+            {nastavnaGodina && (
+              <div className="mb-4 w-full">
+                <WeekendDatePicker
+                  selectedDate={selectedWeekendDate}
+                  onDateSelect={(date) => {
+                    console.log('WeekendDatePicker onDateSelect:', date);
+                    if (date) {
+                      const dayOfWeek = date.getDay();
+                      console.log('Day of week:', dayOfWeek);
+                      const day = dayOfWeek === 6 ? 'subota' : dayOfWeek === 0 ? 'nedjelja' : null;
+                      if (day) {
+                        console.log('Setting selectedDay to', day);
+                        setSelectedDay(day);
+                        setSelectedWeekendDate(date);
+                      }
+                    } else {
+                      console.log('Date is null, resetting selectedDay');
+                      setSelectedDay(null);
+                      setSelectedWeekendDate(null);
+                    }
+                  }}
+                  onResetToToday={() => {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const dayOfWeek = today.getDay();
+                    if (dayOfWeek === 6) {
+                      // Ako je danas subota, postavi subotu
+                      setSelectedWeekendDate(today);
+                      setSelectedDay('subota');
+                    } else if (dayOfWeek === 0) {
+                      // Ako je danas nedjelja, postavi subotu iz istog vikenda (dan prije)
+                      const saturday = new Date(today);
+                      saturday.setDate(saturday.getDate() - 1);
+                      setSelectedWeekendDate(saturday);
+                      setSelectedDay('subota');
+                    } else {
+                      // Ako nije vikend, resetuj odabir
+                      setSelectedWeekendDate(null);
+                      setSelectedDay('subota'); // Defaultno postavi subotu
+                    }
+                  }}
+                  startDate={new Date(nastavnaGodina.datumOd)}
+                  endDate={new Date(nastavnaGodina.datumDo)}
+                  casoviCounts={casoviCounts}
+                />
+              </div>
+            )}
+
+            {/* Legenda/Agenda */}
+            <div className="mb-4 bg-white border border-slate-200 rounded-lg p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">Legenda</h3>
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded border border-amber-300 bg-amber-50"></div>
+                  <span className="text-xs text-slate-700">Prošli časovi bez časa</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded border border-emerald-300 bg-emerald-50"></div>
+                  <span className="text-xs text-slate-700">Prošli časovi sa čason</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded border border-blue-300 bg-blue-50"></div>
+                  <span className="text-xs text-slate-700">Budući časovi</span>
+                </div>
+              </div>
+            </div>
+
             {/* Calendar View - Same style as SetupNastavnaGodinaPage but single day */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                 {/* Header with day labels */}
@@ -934,75 +1235,129 @@ export default function MuallimDashboardPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
-                  {todayWeekendDay ? (
-                    <div className="flex-1">
-                      <button
-                        onClick={() => setSelectedDay(todayWeekendDay)}
-                        className="w-full px-6 py-4 text-sm font-medium bg-blue-50 text-blue-700 border-b-2 border-b-blue-600 cursor-default"
-                      >
-                        <span className="flex items-center justify-center gap-2">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                          {todayWeekendDay === 'subota' ? 'Subota' : 'Nedjelja'}
-                        </span>
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="flex-1">
-                        <button
-                          onClick={() => setSelectedDay('subota')}
-                          className={`w-full px-6 py-4 text-sm font-medium transition-all duration-200 ${
-                            (selectedDay || odabraniDan) === 'subota'
-                              ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
-                              : 'bg-white text-gray-600 hover:bg-gray-50'
-                          }`}
-                        >
-                          <span className="flex items-center justify-center gap-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            Subota
-                          </span>
-                        </button>
-                      </div>
-                      <div className="flex-1 border-l border-gray-200">
-                        <button
-                          onClick={() => setSelectedDay('nedjelja')}
-                          className={`w-full px-6 py-4 text-sm font-medium transition-all duration-200 ${
-                            (selectedDay || odabraniDan) === 'nedjelja'
-                              ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
-                              : 'bg-white text-gray-600 hover:bg-gray-50'
-                          }`}
-                        >
-                          <span className="flex items-center justify-center gap-2">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Nedjelja
-                          </span>
-                        </button>
-                      </div>
-                    </>
-                  )}
+                  {(() => {
+                    // Uvijek prikaži oba dana sa indikatorima
+                    const subotaSlots = collectDaySlots('subota');
+                    const nedjeljaSlots = collectDaySlots('nedjelja');
+                    
+                    return (
+                      <>
+                        <div className="flex-1 relative">
+                          <button
+                            onClick={() => setSelectedDay('subota')}
+                            className={`w-full px-6 py-4 text-sm font-medium transition-all duration-200 relative ${
+                              effectiveSelectedDay === 'subota'
+                                ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
+                                : 'bg-white text-gray-600 hover:bg-gray-50'
+                            }`}
+                          >
+                            <span className="flex items-center justify-center gap-2">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <span>Subota</span>
+                              {subotaSlots.length > 0 && (
+                                <span className={`inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 rounded-full text-[10px] font-semibold ${
+                                  effectiveSelectedDay === 'subota'
+                                    ? 'bg-blue-200 text-blue-800'
+                                    : 'bg-gray-200 text-gray-700'
+                                }`}>
+                                  {subotaSlots.length}
+                                </span>
+                              )}
+                            </span>
+                            {effectiveSelectedDay === 'subota' && (
+                              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>
+                            )}
+                          </button>
+                        </div>
+                        <div className="w-px bg-gray-200"></div>
+                        <div className="flex-1 relative">
+                          <button
+                            onClick={() => setSelectedDay('nedjelja')}
+                            className={`w-full px-6 py-4 text-sm font-medium transition-all duration-200 relative ${
+                              effectiveSelectedDay === 'nedjelja'
+                                ? 'bg-blue-50 text-blue-700 border-b-2 border-b-blue-600'
+                                : 'bg-white text-gray-600 hover:bg-gray-50'
+                            }`}
+                          >
+                            <span className="flex items-center justify-center gap-2">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <span>Nedjelja</span>
+                              {nedjeljaSlots.length > 0 && (
+                                <span className={`inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 rounded-full text-[10px] font-semibold ${
+                                  effectiveSelectedDay === 'nedjelja'
+                                    ? 'bg-blue-200 text-blue-800'
+                                    : 'bg-gray-200 text-gray-700'
+                                }`}>
+                                  {nedjeljaSlots.length}
+                                </span>
+                              )}
+                            </span>
+                            {effectiveSelectedDay === 'nedjelja' && (
+                              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>
+                            )}
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
               </div>
 
                 {/* Timeline container */}
                 <div className="relative flex bg-white">
                   {/* Time labels column */}
                   <div className="w-16 border-r border-gray-200 bg-gray-50/30 relative" style={{ height: `${TIMELINE_HEIGHT}px` }}>
+                    {/* Hour lines - diskretne linije za početak svakog sata */}
                     {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 }, (_, i) => {
                       const hour = TIMELINE_START_HOUR + i;
                       const time = `${hour.toString().padStart(2, '0')}:00`;
                       const position = timeToPosition(time);
                       return (
                         <div
+                          key={`hour-line-${hour}`}
+                          className="absolute left-0 right-0 border-t border-gray-200"
+                          style={{ top: `${position}px` }}
+                        />
+                      );
+                    })}
+                    
+                    {/* Half-hour lines - diskretne linije za pola sata */}
+                    {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR }, (_, i) => {
+                      const hour = TIMELINE_START_HOUR + i;
+                      const time = `${hour.toString().padStart(2, '0')}:30`;
+                      const position = timeToPosition(time);
+                      return (
+                        <div
+                          key={`half-hour-line-${hour}`}
+                          className="absolute left-0 right-0 border-t border-dashed border-gray-100"
+                          style={{ top: `${position}px` }}
+                        />
+                      );
+                    })}
+                    
+                    {/* Time labels - centrirana u sredini svakog sata */}
+                    {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 }, (_, i) => {
+                      const hour = TIMELINE_START_HOUR + i;
+                      const time = `${hour.toString().padStart(2, '0')}:00`;
+                      const position = timeToPosition(time);
+                      // Izračunaj poziciju za sljedeći sat da bismo dobili sredinu
+                      const nextHour = hour + 1;
+                      const nextTime = nextHour <= TIMELINE_END_HOUR 
+                        ? `${nextHour.toString().padStart(2, '0')}:00`
+                        : `${TIMELINE_END_HOUR.toString().padStart(2, '0')}:59`;
+                      const nextPosition = timeToPosition(nextTime);
+                      const hourHeight = nextPosition - position;
+                      const centerPosition = position + (hourHeight / 2);
+                      return (
+                        <div
                           key={hour}
-                          className="absolute left-0 right-0 flex items-center"
-                          style={{ top: `${position}px`, height: `${TIMELINE_HEIGHT / (TIMELINE_END_HOUR - TIMELINE_START_HOUR)}px` }}
+                          className="absolute left-0 right-0 flex items-center justify-center z-10"
+                          style={{ top: `${centerPosition}px`, transform: 'translateY(-50%)' }}
                         >
-                          <div className="w-full text-xs font-semibold text-gray-700 text-center">
+                          <div className="text-xs font-bold text-gray-800 bg-gray-50/30 px-1 rounded">
                             {hour}:00
                           </div>
                         </div>
@@ -1012,7 +1367,7 @@ export default function MuallimDashboardPage() {
 
                   {/* Timeline area – prikaz vikend rasporeda */}
                   <div className="flex-1 relative bg-white" style={{ height: `${TIMELINE_HEIGHT}px` }}>
-                    {/* Hour grid lines */}
+                    {/* Hour grid lines - diskretne linije za početak svakog sata */}
                     {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 }, (_, i) => {
                       const hour = TIMELINE_START_HOUR + i;
                       const time = `${hour.toString().padStart(2, '0')}:00`;
@@ -1026,7 +1381,7 @@ export default function MuallimDashboardPage() {
                       );
                     })}
 
-                    {/* Half-hour markers */}
+                    {/* Half-hour markers - diskretne linije za pola sata */}
                     {Array.from({ length: TIMELINE_END_HOUR - TIMELINE_START_HOUR }, (_, i) => {
                       const hour = TIMELINE_START_HOUR + i;
                       const time = `${hour.toString().padStart(2, '0')}:30`;
@@ -1044,8 +1399,8 @@ export default function MuallimDashboardPage() {
                     {(() => {
                       const currentPos = getCurrentTimePosition();
                       const currentDay = new Date().getDay();
-                      const isCurrentDay = (currentDay === 0 && (selectedDay || odabraniDan) === 'nedjelja') || 
-                                          (currentDay === 6 && (selectedDay || odabraniDan) === 'subota');
+                      const isCurrentDay = (currentDay === 0 && effectiveSelectedDay === 'nedjelja') || 
+                                          (currentDay === 6 && effectiveSelectedDay === 'subota');
                       
                       if (currentPos !== null && isCurrentDay) {
               return (
@@ -1065,7 +1420,11 @@ export default function MuallimDashboardPage() {
             })()}
 
                     {/* Occupied slots - prikaz oba dana; klik dozvoljen samo za trenutni vikend dan */}
-                    {WEEKEND_DAYS.flatMap((day) =>
+                    {/* Ako je odabran datum u picker-u, prikaži samo slotove za odabrani dan, inače prikaži oba dana */}
+                    {(selectedWeekendDate 
+                      ? [effectiveSelectedDay]
+                      : WEEKEND_DAYS
+                    ).flatMap((day) =>
                       collectDaySlots(day).map((slot) => ({ ...slot, dan: day })),
                     ).map((slot, idx) => {
                       const top = timeToPosition(slot.start);
@@ -1077,33 +1436,78 @@ export default function MuallimDashboardPage() {
                       const leftPct = widthPct * index;
                       const margin = 2;
                       const isActive = currentSlots.some((s) => s.id === slot.item.id);
-                      const info = getIlmihalInfo(slot.item.grupa.razred.ilmihal);
                       const isSlotOnSelectedDay = slot.item.dan === effectiveSelectedDay;
                       const isTodaySlot = !!todayWeekendDay && slot.item.dan === todayWeekendDay;
-                      const isPastTodaySlot = isSlotPastToday(slot.item);
+                      // Izračunaj tačan datum za ovaj slot na osnovu pickera
+                      let slotDate: Date;
+                      if (selectedWeekendDate) {
+                        const selectedDayOfWeek = selectedWeekendDate.getDay();
+                        const slotDay = slot.item.dan === 'subota' ? 6 : 0;
+                        
+                        if (selectedDayOfWeek === slotDay) {
+                          // Slot je za isti dan kao odabrani datum - koristi tačan datum
+                          slotDate = new Date(selectedWeekendDate);
+                          slotDate.setHours(0, 0, 0, 0);
+                        } else if (slotDay === 6 && selectedDayOfWeek === 0) {
+                          // Slot je za subotu, a odabrana je nedjelja - vrati subotu prije
+                          slotDate = new Date(selectedWeekendDate);
+                          slotDate.setDate(slotDate.getDate() - 1);
+                          slotDate.setHours(0, 0, 0, 0);
+                        } else if (slotDay === 0 && selectedDayOfWeek === 6) {
+                          // Slot je za nedjelju, a odabrana je subota - vrati nedjelju poslije
+                          slotDate = new Date(selectedWeekendDate);
+                          slotDate.setDate(slotDate.getDate() + 1);
+                          slotDate.setHours(0, 0, 0, 0);
+                        } else {
+                          // Fallback
+                          slotDate = getSlotDate(slot.item.dan as 'subota' | 'nedjelja');
+                        }
+                      } else {
+                        slotDate = getSlotDate(slot.item.dan as 'subota' | 'nedjelja');
+                      }
+                      
+                      const isPastSlot = isSlotPast(slot.item, slotDate);
                       const canOpenDrawerForSlot =
-                        isTodaySlot && isSlotStartedToday(slot.item);
-                      const isCompletedSlot = !!slot.item.imaUnosCasa;
+                        isPastSlot || (isTodaySlot && isSlotStartedToday(slot.item));
+                      
+                      // Provjeri da li postoji čas za specifičan datum i slot
+                      // Koristi format koji ne ovisi o vremenskoj zoni
+                      const formatDateForAPI = (date: Date): string => {
+                        const year = date.getFullYear();
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const day = String(date.getDate()).padStart(2, '0');
+                        return `${year}-${month}-${day}`;
+                      };
+                      const dateISO = formatDateForAPI(slotDate);
+                      const casKey = `${slot.item.id}-${dateISO}`;
+                      const isCompletedSlot = casExistsMap.get(casKey) ?? false;
 
-                      // Use light blue colors for all slots (like SetupNastavnaGodinaPage)
+                      // Boje na osnovu statusa casa
                       const getSlotStyle = () => {
                         if (isActive) {
                           // Active slot - darker blue with very thin border
-                          return 'bg-blue-600 border border-blue-500/30 text-white shadow-lg';
+                          return 'bg-blue-600 border-[0.5px] border-blue-500/30 text-white shadow-lg';
                         }
 
-                        // Slot za današnji vikend dan koji je prošao i nema unos – narandžasti highlight
-                        if (isTodaySlot && isPastTodaySlot && !isCompletedSlot) {
+                        // Prošli casovi bez casa - žuti
+                        if (isPastSlot && !isCompletedSlot) {
                           return isOverlap
-                            ? 'bg-orange-50 border border-orange-300 text-orange-900 shadow-sm ring-1 ring-orange-300/60'
-                            : 'bg-orange-50 border border-orange-300 text-orange-900';
+                            ? 'bg-amber-50 border-[0.5px] border-amber-200/50 text-amber-900 shadow-sm ring-1 ring-amber-300/60'
+                            : 'bg-amber-50 border-[0.5px] border-amber-200/50 text-amber-900';
                         }
 
-                        // Normal slot - light plava; slotovi za drugi dan su malo isprani
+                        // Prošli casovi sa casom - zeleni
+                        if (isPastSlot && isCompletedSlot) {
+                          return isOverlap
+                            ? 'bg-emerald-50 border-[0.5px] border-emerald-200/50 text-emerald-900 shadow-sm ring-1 ring-emerald-300/60'
+                            : 'bg-emerald-50 border-[0.5px] border-emerald-200/50 text-emerald-900';
+                        }
+
+                        // Budući casovi - plavi
                         const base =
                           isOverlap
-                            ? 'bg-blue-100 border-[0.5px] border-blue-300 text-blue-900 shadow-sm ring-0.5 ring-blue-300/50'
-                            : 'bg-blue-50 border-[0.5px] border-blue-200 text-blue-900/90';
+                            ? 'bg-blue-100 border-[0.5px] border-blue-300/50 text-blue-900 shadow-sm ring-0.5 ring-blue-300/50'
+                            : 'bg-blue-50 border-[0.5px] border-blue-200/50 text-blue-900/90';
 
                         return isSlotOnSelectedDay ? base : `${base} opacity-55`;
                       };
@@ -1119,9 +1523,13 @@ export default function MuallimDashboardPage() {
                             if (!canOpenDrawerForSlot) return;
                             setSelectedSlotForDrawer(slot.item);
                             setShowCasDrawer(true);
+                            // Spremi datum za drawer
+                            setSelectedSlotDate(slotDate);
                           }}
-                          className={`absolute rounded-md border-[0.5px] ${getSlotStyle()} px-3 py-2 text-[14px] font-medium text-left ${
-                            canOpenDrawerForSlot ? 'cursor-pointer' : ''
+                          className={`absolute rounded-md ${getSlotStyle()} px-3 py-2 text-[14px] font-medium text-left ${
+                            canOpenDrawerForSlot 
+                              ? 'cursor-pointer hover:shadow-md transition-shadow' 
+                              : 'cursor-not-allowed opacity-60'
                           }`}
                           disabled={!canOpenDrawerForSlot}
                           style={{
@@ -1134,17 +1542,20 @@ export default function MuallimDashboardPage() {
                           }}
                           title={`${slot.start} - ${slot.end} • ${slot.label}`}
                         >
-                          <div className="flex items-center justify-between h-full gap-1">
+                          <div className="flex items-center justify-between h-full gap-2 w-full">
                             <div className="flex flex-col justify-center overflow-hidden flex-1 min-w-0">
-                              <div className={`flex items-center gap-1 text-[13px] font-bold leading-tight truncate ${isActive ? 'text-white' : ''}`}>
-                                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                {slot.start} - {slot.end}
+                              <div className={`flex items-center gap-2 text-[13px] font-bold leading-tight ${isActive ? 'text-white' : ''}`}>
+                                {/* Vrijeme i dan */}
+                                <div className="flex items-center gap-1.5 truncate flex-1 min-w-0">
+                                  <span className={`truncate font-bold ${isActive ? 'text-white' : ''}`}>{slot.start} - {slot.end}</span>
+                                  <div className={`text-[11px] font-normal whitespace-nowrap flex-shrink-0 ${isActive ? 'text-white/90' : 'opacity-80'}`}>
+                                    • {formatSlotDate(slotDate)} • {formatSlotDayName(slotDate)}
+                                  </div>
+                                </div>
                       </div>
                               {height >= 32 && (
                                 <>
-                                  <div className={`flex items-center gap-1 text-[13px] font-normal leading-tight truncate mt-0.5 ${isActive ? 'text-white/90' : 'opacity-90'}`}>
+                                  <div className={`flex items-center gap-1.5 text-[13px] font-normal leading-tight truncate mt-0.5 ${isActive ? 'text-white/90' : 'opacity-90'}`}>
                                     <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                                     </svg>
@@ -1166,7 +1577,28 @@ export default function MuallimDashboardPage() {
                                   {slot.label.split(' • ')[0]}
                                 </div>
                         )}
-                      </div>
+                            </div>
+                            {/* Badge na desnoj strani */}
+                            <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                              {/* Badge za prošle termine bez casa */}
+                              {isPastSlot && !isCompletedSlot && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                  </svg>
+                                  Nema časa
+                                </span>
+                              )}
+                              {/* Badge za termine sa casom */}
+                              {isCompletedSlot && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                  Čas dodan
+                                </span>
+                              )}
+                            </div>
                     </div>
                   </button>
                 );
@@ -1369,9 +1801,25 @@ export default function MuallimDashboardPage() {
       <CasEntryDrawer
         open={showCasDrawer}
         slot={selectedSlotForDrawer}
+        slotDate={selectedSlotDate}
         onClose={() => {
           setShowCasDrawer(false);
           setSelectedSlotForDrawer(null);
+          setSelectedSlotDate(null);
+        }}
+        onSave={async () => {
+          // Nakon spremanja, osvježi mapu casova
+          if (selectedSlotForDrawer && selectedSlotDate) {
+            const dateISO = selectedSlotDate.toISOString().split('T')[0];
+            const key = `${selectedSlotForDrawer.id}-${dateISO}`;
+            setCasExistsMap((prev) => {
+              const newMap = new Map(prev);
+              newMap.set(key, true);
+              return newMap;
+            });
+          }
+          // Također osvježi dashboard podatke
+          await fetchDashboardData();
         }}
       />
     </div>

@@ -36,12 +36,16 @@ export class MuallimController {
 
   @Get('dashboard')
   @UseGuards(JwtAuthGuard)
-  async getDashboard(@Request() req: any, @Query('dan') dan?: 'subota' | 'nedjelja') {
+  async getDashboard(
+    @Request() req: any,
+    @Query('dan') dan?: 'subota' | 'nedjelja',
+    @Query('datum') datum?: string,
+  ) {
     if (!req.user || !req.user.id) {
       throw new BadRequestException('Korisnik nije autentifikovan');
     }
     const korisnikId = req.user.id;
-    return this.muallimService.getDashboardData(korisnikId, dan);
+    return this.muallimService.getDashboardData(korisnikId, dan, datum);
   }
 
   @Get(':id')

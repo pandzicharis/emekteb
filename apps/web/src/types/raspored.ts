@@ -21,5 +21,7 @@ export interface RasporedItem {
   endTime: string;
   // Opcionalno: backend može vratiti informaciju da li je unos za ovaj čas već zabilježen
   imaUnosCasa?: boolean;
+  // ID časa za današnji datum (ako postoji) – olakšava dohvat detalja časa iz kalendara
+  trenutniCasId?: string | null;
 }
 

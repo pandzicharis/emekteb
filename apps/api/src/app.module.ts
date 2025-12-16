@@ -9,9 +9,10 @@ import { LekcijaModule } from './lekcija/lekcija.module';
 import { NastavniPlanModule } from './nastavni-plan/nastavni-plan.module';
 import { MuallimModule } from './muallim/muallim.module';
 import { NastavnaGodinaModule } from './nastavna-godina/nastavna-godina.module';
+import { CasModule } from './cas/cas.module';
 
 @Module({
-  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule],
+  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule, CasModule],
   controllers: [AppController],
   providers: [AppService],
 })

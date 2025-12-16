@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { parse } from 'csv-parse/sync';
 import * as fs from 'fs';
@@ -26,6 +26,7 @@ interface ImportLog {
 
 @Injectable()
 export class ImportService {
+  private readonly logger = new Logger(ImportService.name);
   private mapping: any;
   private metadata: any;
 
@@ -56,8 +57,9 @@ export class ImportService {
     try {
       this.mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf-8'));
       this.metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+      this.logger.log(`✅ CSV mapping fajlovi učitani: ${mappingPath}`);
     } catch (error) {
-      console.error('Greška pri učitavanju mapping fajlova:', error);
+      this.logger.error(`❌ Greška pri učitavanju mapping fajlova: ${error}`);
       throw new Error('Ne mogu učitati CSV mapping konfiguraciju');
     }
   }
@@ -94,7 +96,7 @@ export class ImportService {
       });
 
       // Procesiraj svaki red
-      console.log(`\n📊 Počinje procesiranje ${records.length} redova...\n`);
+      this.logger.log(`📊 Počinje procesiranje ${records.length} redova...`);
       
       for (let i = 0; i < records.length; i++) {
         let row = records[i];
@@ -103,7 +105,7 @@ export class ImportService {
         const redBroj = i + 1;
         const eksterniId = this.parseValue(row['id'], 'int');
         
-        console.log(`[${redBroj}/${records.length}] Procesiranje reda - Eksterni ID: ${eksterniId || 'N/A'}, Ime: ${row['ucenik_ime'] || 'N/A'}, Prezime: ${row['ucenik_prezime'] || 'N/A'}`);
+        this.logger.debug(`[${redBroj}/${records.length}] Procesiranje reda - Eksterni ID: ${eksterniId || 'N/A'}, Ime: ${row['ucenik_ime'] || 'N/A'}, Prezime: ${row['ucenik_prezime'] || 'N/A'}`);
         
         const result = await this.processRow(row, redBroj);
         
@@ -111,10 +113,10 @@ export class ImportService {
         if (result.ucenikId) {
           if (result.isNew) {
             log.novi.push(result.ucenikId);
-            console.log(`  ✅ Uspješno kreiran novi učenik (ID: ${result.ucenikId})`);
+            this.logger.debug(`✅ Uspješno kreiran novi učenik (ID: ${result.ucenikId})`);
           } else {
             log.updateani.push(result.ucenikId);
-            console.log(`  ✅ Uspješno ažuriran postojeći učenik (ID: ${result.ucenikId})`);
+            this.logger.debug(`✅ Uspješno ažuriran postojeći učenik (ID: ${result.ucenikId})`);
           }
           log.uspjesni.push(result.ucenikId);
           
@@ -132,7 +134,7 @@ export class ImportService {
                 greske: result.greske,
               },
             });
-            console.log(`  ⚠️  Učenik kreiran sa greškama: ${Object.keys(result.greske).join(', ')}`);
+            this.logger.warn(`⚠️  Učenik kreiran sa greškama: ${Object.keys(result.greske).join(', ')}`);
           }
         } else {
           // Ako nije kreiran učenik, dodaj u greške
@@ -151,29 +153,17 @@ export class ImportService {
           
           log.greske.push(errorDetails);
           
-          console.error(`  ❌ Nije moguće kreirati učenika: ${errorDetails.greska}`);
+          this.logger.error(`❌ Nije moguće kreirati učenika (Red ${redBroj}): ${errorDetails.greska}`);
         }
       }
       
-      console.log(`\n📈 Završeno procesiranje:`);
-      console.log(`   ✅ Uspješno: ${log.uspjesni.length}`);
-      console.log(`   🆕 Novi: ${log.novi.length}`);
-      console.log(`   🔄 Ažurirani: ${log.updateani.length}`);
-      console.log(`   ❌ Greške: ${log.greske.length}\n`);
+      this.logger.log(`📈 Završeno procesiranje: ✅ Uspješno: ${log.uspjesni.length}, 🆕 Novi: ${log.novi.length}, 🔄 Ažurirani: ${log.updateani.length}, ❌ Greške: ${log.greske.length}`);
       
       // Detaljni sažetak grešaka
       if (log.greske.length > 0) {
-        console.log(`\n📋 DETALJNI SAŽETAK GREŠAKA:\n`);
+        this.logger.warn(`📋 DETALJNI SAŽETAK GREŠAKA (${log.greske.length} grešaka):`);
         log.greske.forEach((greska, index) => {
-          console.log(`${index + 1}. Red ${greska.red} (Eksterni ID: ${greska.eksterniId || 'N/A'}):`);
-          console.log(`   - Poruka: ${greska.greska}`);
-          if (greska.kontekst) {
-            console.log(`   - Kontekst: ${greska.kontekst}`);
-          }
-          if (greska.podaci) {
-            console.log(`   - Podaci: Ime="${greska.podaci.ime || 'N/A'}", Prezime="${greska.podaci.prezime || 'N/A'}"`);
-          }
-          console.log(``);
+          this.logger.warn(`${index + 1}. Red ${greska.red} (Eksterni ID: ${greska.eksterniId || 'N/A'}): ${greska.greska}`);
         });
         
         // Grupisanje grešaka po tipu
@@ -183,11 +173,7 @@ export class ImportService {
           greskePoKontekstu[kontekst] = (greskePoKontekstu[kontekst] || 0) + 1;
         });
         
-        console.log(`\n📊 GREŠKE PO KONTEKSTU:`);
-        Object.entries(greskePoKontekstu).forEach(([kontekst, broj]) => {
-          console.log(`   ${kontekst}: ${broj}`);
-        });
-        console.log(``);
+        this.logger.warn(`📊 GREŠKE PO KONTEKSTU: ${JSON.stringify(greskePoKontekstu)}`);
       }
 
       // Ažuriraj Import zapis
@@ -396,7 +382,7 @@ export class ImportService {
             data: { greske: greske as any },
           });
         } catch (error) {
-          console.error(`Greška pri ažuriranju grešaka za učenika ${ucenikId}:`, error);
+          this.logger.error(`Greška pri ažuriranju grešaka za učenika ${ucenikId}: ${error}`);
         }
       }
     }
@@ -592,7 +578,7 @@ export class ImportService {
         // Validacija email formata (opciono)
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email.trim())) {
-          console.warn(`⚠️  Neispravan format emaila za kontakt: "${email}" - preskače se`);
+          this.logger.warn(`⚠️  Neispravan format emaila za kontakt: "${email}" - preskače se`);
         } else {
           kontakti.push({
             ucenikId,
@@ -696,7 +682,7 @@ export class ImportService {
         if (dateValue && dateValue !== '') {
           const date = new Date(dateValue);
           if (isNaN(date.getTime())) {
-            console.warn(`⚠️  Neispravan format datuma za ${field}: "${dateValue}" - postavljeno na null`);
+            this.logger.warn(`⚠️  Neispravan format datuma za ${field}: "${dateValue}" - postavljeno na null`);
             fixedRow[field] = '';
           }
         }
@@ -740,7 +726,7 @@ export class ImportService {
       
       const parsed = parseInt(numericValue, 10);
       if (isNaN(parsed)) {
-        console.warn(`⚠️  Neispravna numerička vrijednost: "${value}" -> postavljeno na null`);
+        this.logger.warn(`⚠️  Neispravna numerička vrijednost: "${value}" -> postavljeno na null`);
         return null;
       }
       return parsed;
@@ -760,7 +746,7 @@ export class ImportService {
       }
       
       if (isNaN(date.getTime())) {
-        console.warn(`⚠️  Neispravan format datuma: "${value}" -> postavljeno na null`);
+        this.logger.warn(`⚠️  Neispravan format datuma: "${value}" -> postavljeno na null`);
         return null;
       }
       
@@ -796,7 +782,7 @@ export class ImportService {
     
     // Ako nema mapiranja, vrati null umjesto da pokušava normalizaciju
     // Ovo će rezultovati da se polje postavi na null u bazi
-    console.warn(`⚠️  Nema mapiranja za enum vrijednost "${trimmedValue}" u polju "${field}" - postavljeno na null`);
+    this.logger.warn(`⚠️  Nema mapiranja za enum vrijednost "${trimmedValue}" u polju "${field}" - postavljeno na null`);
     return null;
   }
 
