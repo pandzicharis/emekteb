@@ -353,6 +353,160 @@ export class CasService {
   }
 
   /**
+   * Statistika lekcija i ocjena za sve učenike jedne grupe.
+   *
+   * Koristi se u Muallim dashboardu za prikaz:
+   * - procenta naučenog gradiva po učeniku
+   * - broja lekcija koje je učenik imao
+   * - prosječne ocjene učenika
+   *
+   * Vraća agregirane podatke za sve učenike u datoj grupi.
+   */
+  async getLessonsStatsForGroup(grupaId: string) {
+    if (!grupaId) {
+      throw new BadRequestException('grupaId je obavezan');
+    }
+
+    // Pronađi grupu i ukupan broj lekcija za razred
+    const grupa = await this.prisma.grupa.findUnique({
+      where: { id: grupaId },
+      include: {
+        razredNastavnaGodina: {
+          include: {
+            razred: {
+              include: {
+                lekcije: true,
+              },
+            },
+            nastavnaGodina: true,
+          },
+        },
+      },
+    });
+
+    if (!grupa || !grupa.razredNastavnaGodina?.razred) {
+      throw new NotFoundException('Grupa ili razred nisu pronađeni');
+    }
+
+    const totalLessonsForRazred = grupa.razredNastavnaGodina.razred.lekcije.length;
+    const nastavnaGodinaNaziv =
+      grupa.razredNastavnaGodina.nastavnaGodina?.naziv ?? null;
+
+    // Sve ocjene za časove ove grupe
+    const ocjene = await this.prisma.casOcjena.findMany({
+      where: {
+        cas: {
+          grupaId,
+        },
+      },
+      include: {
+        lekcija: true,
+        cas: {
+          select: {
+            datum: true,
+          },
+        },
+      },
+      orderBy: {
+        vrijeme: 'asc',
+      },
+    });
+
+    type StudentStats = {
+      ucenikId: string;
+      totalLessons: number;
+      learnedLessonsCount: number;
+      averageGrade: number | null;
+      totalGrades: number;
+      lessons: {
+        lekcijaId: string;
+        naslov: string;
+        tip: string | null;
+        averageGrade: number;
+        lastGrade: number;
+        gradesCount: number;
+        lastDate: Date;
+        ocjene: {
+          ocjena: number;
+          komentar: string | null;
+          datum: Date;
+        }[];
+      }[];
+    };
+
+    const statsByStudent = new Map<string, StudentStats>();
+
+    for (const o of ocjene) {
+      const ucenikId = o.ucenikId;
+      if (!statsByStudent.has(ucenikId)) {
+        statsByStudent.set(ucenikId, {
+          ucenikId,
+          totalLessons: totalLessonsForRazred,
+          learnedLessonsCount: 0,
+          averageGrade: null,
+          totalGrades: 0,
+          lessons: [],
+        });
+      }
+
+      const studentStats = statsByStudent.get(ucenikId)!;
+      studentStats.totalGrades += 1;
+
+      // Grupisanje po lekciji
+      let lessonStats = studentStats.lessons.find((l) => l.lekcijaId === o.lekcijaId);
+      if (!lessonStats) {
+        lessonStats = {
+          lekcijaId: o.lekcijaId,
+          naslov: o.lekcija.naslov,
+          tip: o.lekcija.tip,
+          averageGrade: 0,
+          lastGrade: o.ocjena,
+          gradesCount: 0,
+          lastDate: o.cas.datum,
+          ocjene: [],
+        };
+        studentStats.lessons.push(lessonStats);
+      }
+
+      lessonStats.gradesCount += 1;
+      lessonStats.lastGrade = o.ocjena;
+      lessonStats.lastDate = o.cas.datum;
+      lessonStats.ocjene.push({
+        ocjena: o.ocjena,
+        komentar: o.komentar,
+        datum: o.cas.datum,
+      });
+    }
+
+    // Izračun prosjeka po lekciji i učeniku
+    statsByStudent.forEach((studentStats) => {
+      let gradeSum = 0;
+
+      studentStats.lessons.forEach((lessonStats) => {
+        const sum = lessonStats.ocjene.reduce((acc, x) => acc + x.ocjena, 0);
+        lessonStats.averageGrade = sum / lessonStats.ocjene.length;
+        gradeSum += sum;
+      });
+
+      studentStats.learnedLessonsCount = studentStats.lessons.length;
+      studentStats.averageGrade =
+        studentStats.totalGrades > 0 ? gradeSum / studentStats.totalGrades : null;
+    });
+
+    // Pretvori mapu u običan objekat (ucenikId -> StudentStats)
+    const result: Record<string, StudentStats> = {};
+    statsByStudent.forEach((value, key) => {
+      result[key] = value;
+    });
+
+    return {
+      totalLessonsForRazred,
+      nastavnaGodinaNaziv,
+      students: result,
+    };
+  }
+
+  /**
    * Vraća broj časova za svaki datum u opsegu za sve slotove određenog muallima.
    * Koristi se za prikaz statistike u date picker-u.
    */

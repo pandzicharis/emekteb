@@ -40,6 +40,38 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
   const lessonDropdownRef = useRef<HTMLDivElement | null>(null);
   const [gradeStudentSearch, setGradeStudentSearch] = useState('');
   const [existingCasId, setExistingCasId] = useState<string | null>(null);
+  const [studentLessonStats, setStudentLessonStats] = useState<
+    | {
+        totalLessonsForRazred: number;
+        nastavnaGodinaNaziv: string | null;
+        students: Record<
+          string,
+          {
+            ucenikId: string;
+            totalLessons: number;
+            learnedLessonsCount: number;
+            averageGrade: number | null;
+            totalGrades: number;
+            lessons: {
+              lekcijaId: string;
+              naslov: string;
+              tip: string | null;
+              averageGrade: number;
+              lastGrade: number;
+              gradesCount: number;
+              lastDate: string;
+              ocjene: {
+                ocjena: number;
+                komentar: string | null;
+                datum: string;
+              }[];
+            }[];
+          }
+        >;
+      }
+    | null
+  >(null);
+  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
   const [casFormData, setCasFormData] = useState<{
     tipoviCasa: TipCasa[];
     lekcije: string[];
@@ -85,13 +117,18 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
         } else {
           // Pokušaj da nađeš čas po slotId i datumu
           promises.push(
-            axios.get(`${API_URL}/cas/slot/${slot.id}`, {
-              params: { datum: formatDateForQuery(dateForCas) },
-            }).catch(() => null) // Ignoriši grešku ako ne postoji
+            axios
+              .get(`${API_URL}/cas/slot/${slot.id}`, {
+                params: { datum: formatDateForQuery(dateForCas) },
+              })
+              .catch(() => null), // Ignoriši grešku ako ne postoji
           );
         }
+
+        // Statistika lekcija i ocjena za sve učenike grupe
+        promises.push(axios.get(`${API_URL}/cas/grupa/${slot.grupa.id}/lekcije-stats`));
         
-        const [lessonsRes, existingCasRes] = await Promise.all(promises);
+        const [lessonsRes, existingCasRes, statsRes] = await Promise.all(promises);
 
         // Dedup lekcije po ID-u – ako backend vrati duplikate, čuvamo samo prvi zapis
         const rawLessons = lessonsRes.data ?? [];
@@ -141,8 +178,8 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
           ocjene: defaultGrades,
         };
         
-        const initialSelectedLessons = defaultSelectedLessons;
-        const initialLessonInputs = defaultLessonInputs;
+        const initialSelectedLessons = { ...defaultSelectedLessons };
+        const initialLessonInputs = { ...defaultLessonInputs };
         let casId: string | null = null;
 
         if (existingCasRes?.data) {
@@ -176,6 +213,15 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
               grades[lesson.id][s.id] = { ocjena: null, komentar: '' };
             });
           });
+          // Pomoćna mapa da zapamtimo zadnju ocjenu po učeniku (za inicijalni odabir lekcije pri uređivanju)
+          const latestByStudent: Record<
+            string,
+            {
+              lekcijaId: string;
+              vrijeme: string | Date;
+            }
+          > = {};
+
           (cas.ocjene || []).forEach((o: any) => {
             const lekcijaId = o.lekcija?.id || o.lekcijaId;
             const ucenikId = o.ucenik?.id || o.ucenikId;
@@ -184,8 +230,22 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                 ocjena: o.ocjena ?? null,
                 komentar: o.komentar || '',
               };
+
+              const vrijeme = o.vrijeme || cas.datum;
+              const prev = latestByStudent[ucenikId];
+              if (!prev || new Date(vrijeme) > new Date(prev.vrijeme)) {
+                latestByStudent[ucenikId] = { lekcijaId, vrijeme };
+              }
             }
           });
+
+          // Inicijalno odaberi zadnju lekciju za svakog učenika (da bi se ocjena vidjela pri uređivanju)
+          Object.entries(latestByStudent).forEach(([ucenikId, info]) => {
+            if (defaultSelectedLessons[ucenikId] === null) {
+              initialSelectedLessons[ucenikId] = info.lekcijaId;
+            }
+          });
+
           initialFormData.ocjene = grades;
         }
 
@@ -195,6 +255,15 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
         setCasFormData(initialFormData);
         setSelectedLessonByStudent(initialSelectedLessons);
         setLessonInputByStudent(initialLessonInputs);
+        setStudentLessonStats(
+          statsRes?.data
+            ? {
+                totalLessonsForRazred: statsRes.data.totalLessonsForRazred ?? 0,
+                nastavnaGodinaNaziv: statsRes.data.nastavnaGodinaNaziv ?? null,
+                students: statsRes.data.students ?? {},
+              }
+            : null,
+        );
       } catch (err) {
         console.error('Greška pri učitavanju podataka za čas', err);
       } finally {
@@ -317,6 +386,8 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
   }, [casFormData, slot]);
 
   if (!open || !slot) return null;
+
+  const isEditing = !!existingCasId;
 
   const formatTime = (time: string) => {
     const [hours, minutes] = time.split(':');
@@ -475,12 +546,31 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
         `}</style>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white/90 backdrop-blur sticky top-0 z-10">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-blue-700">
               <span className="inline-flex h-2 w-2 rounded-full bg-blue-600 animate-pulse"></span>
-              Unos časa
+              {isEditing ? 'Ažuriranje časa' : 'Unos časa'}
               <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 px-2 py-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 <span className="text-[10px] font-semibold">{slot.dan}</span>
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-600 text-white px-2 py-0.5 border border-blue-700">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                <span className="text-[10px] font-semibold normal-case">
+                  {(() => {
+                    const d = slotDate ? new Date(slotDate) : new Date();
+                    const day = d.getDate().toString().padStart(2, '0');
+                    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+                    const year = d.getFullYear();
+                    return `${day}.${month}.${year}.`;
+                  })()}
+                </span>
               </span>
             </div>
             <h2 className="text-xl md:text-2xl font-bold text-slate-900">
@@ -952,259 +1042,473 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                                 .includes(gradeStudentSearch.trim().toLowerCase())
                             : true,
                         )
+                        // Sortiraj učenike po prosjeku (silazno) – najbolji prvi
+                        .slice()
+                        .sort((a, b) => {
+                          const statsA = studentLessonStats?.students?.[a.id];
+                          const statsB = studentLessonStats?.students?.[b.id];
+                          const avgA = statsA?.averageGrade ?? 0;
+                          const avgB = statsB?.averageGrade ?? 0;
+                          return avgB - avgA;
+                        })
                         .map((student) => {
-                        const baseSelectedLessonId =
-                          selectedLessonByStudent[student.id] ?? null;
+                          const baseSelectedLessonId =
+                            selectedLessonByStudent[student.id] ?? null;
 
-                        // Ako korisnik još nije odabrao lekciju, selectedLessonId ostaje null
-                        const selectedLessonId = baseSelectedLessonId ?? null;
-                        const record =
-                          (selectedLessonId &&
-                            casFormData.ocjene[selectedLessonId]?.[student.id]) || {
-                            ocjena: null,
-                            komentar: '',
+                          const selectedLessonId = baseSelectedLessonId ?? null;
+                          const record =
+                            (selectedLessonId &&
+                              casFormData.ocjene[selectedLessonId]?.[student.id]) || {
+                              ocjena: null,
+                              komentar: '',
+                            };
+
+                          const getActiveGradeClasses = (grade: number) => {
+                            switch (grade) {
+                              case 5:
+                                return 'bg-emerald-600 border-emerald-600 text-white shadow-sm';
+                              case 4:
+                                return 'bg-emerald-300 border-emerald-400 text-emerald-900 shadow-sm';
+                              case 3:
+                                return 'bg-amber-300 border-amber-400 text-amber-900 shadow-sm';
+                              case 2:
+                                return 'bg-orange-300 border-orange-400 text-orange-900 shadow-sm';
+                              case 1:
+                              default:
+                                return 'bg-rose-300 border-rose-400 text-rose-900 shadow-sm';
+                            }
                           };
 
-                        const getActiveGradeClasses = (grade: number) => {
-                          switch (grade) {
-                            case 5:
-                              return 'bg-emerald-600 border-emerald-600 text-white shadow-sm';
-                            case 4:
-                              return 'bg-emerald-300 border-emerald-400 text-emerald-900 shadow-sm';
-                            case 3:
-                              return 'bg-amber-300 border-amber-400 text-amber-900 shadow-sm';
-                            case 2:
-                              return 'bg-orange-300 border-orange-400 text-orange-900 shadow-sm';
-                            case 1:
-                            default:
-                              return 'bg-rose-300 border-rose-400 text-rose-900 shadow-sm';
-                          }
-                        };
+                          const stats = studentLessonStats?.students?.[student.id] ?? null;
+                          const totalLessons =
+                            studentLessonStats?.totalLessonsForRazred ??
+                            stats?.totalLessons ??
+                            0;
+                          const learned = stats?.learnedLessonsCount ?? 0;
+                          const percent =
+                            totalLessons > 0 ? Math.round((learned / totalLessons) * 100) : 0;
+                          const avg =
+                            stats?.averageGrade != null
+                              ? Math.round(stats.averageGrade * 10) / 10
+                              : null;
 
-                        return (
-                          <div
-                            key={student.id}
-                            className="grid grid-cols-1 md:grid-cols-[1.1fr,0.9fr,1.1fr] gap-2 items-start px-3 py-3 rounded-lg bg-slate-50/70 border border-slate-200"
-                          >
-                            {/* Učenik + stat linija (bez boxa i ikonice) */}
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-700">
-                                  {student.ime.charAt(0)}
-                                  {student.prezime.charAt(0)}
-                                </div>
-                                <div className="space-y-0.5">
-                                  <div className="text-sm font-semibold text-slate-900">
-                                    {student.ime} {student.prezime}
+                          const showHistoryDetails =
+                            expandedStudentId === student.id &&
+                            !!studentLessonStats?.students?.[student.id];
+
+                          return (
+                            <div
+                              key={student.id}
+                              className="grid grid-cols-1 md:grid-cols-[1.1fr,0.9fr,1.1fr] gap-2 items-start px-3 py-3 rounded-lg bg-slate-50/70 border border-slate-200"
+                            >
+                              {/* Učenik + stat linija */}
+                              <div className="flex flex-col gap-1.5">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-700">
+                                    {student.ime.charAt(0)}
+                                    {student.prezime.charAt(0)}
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <div className="text-sm font-semibold text-slate-900">
+                                      {student.ime} {student.prezime}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                              <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
-                                {/* Mini graf napretka (npr. 50% naučeno, 50% preostalo) */}
-                                <div className="flex flex-col gap-2">
-                                  <div className="w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
-                                    <div className="h-full w-1/2 bg-emerald-500 rounded-full" />
+                                <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
+                                  {/* Mini graf napretka */}
+                                  <div className="flex flex-col gap-2">
+                                    <div className="w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
+                                      <div
+                                        className="h-full bg-emerald-500 rounded-full"
+                                        style={{ width: `${percent}%` }}
+                                      />
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-semibold text-slate-900">
+                                        {percent}%
+                                      </span>
+                                      <span className="uppercase tracking-wide text-slate-500">
+                                        Naučenog gradiva
+                                      </span>
+                                    </div>
                                   </div>
-                                  <div className="flex items-center gap-1">
-                                    <span className="font-semibold text-slate-900">50%</span>
+                                  <span className="w-px h-6 bg-slate-200" />
+                                  <div className="flex flex-col">
+                                    <span className="font-semibold text-slate-900">
+                                      {learned}/{totalLessons || '—'}
+                                    </span>
                                     <span className="uppercase tracking-wide text-slate-500">
-                                      Naučenog gradiva
+                                      Lekcija
                                     </span>
                                   </div>
-                                </div>
-                                <span className="w-px h-6 bg-slate-200" />
-                                <div className="flex flex-col">
-                                  <span className="font-semibold text-slate-900">12/20</span>
-                                  <span className="uppercase tracking-wide text-slate-500">
-                                    Lekcija
-                                  </span>
-                                </div>
-                                <span className="w-px h-6 bg-slate-200" />
-                                <div className="flex flex-col">
-                                  <span className="font-semibold text-slate-900">4.3</span>
-                                  <span className="uppercase tracking-wide text-slate-500">
-                                    Prosjek
-                                  </span>
+                                  <span className="w-px h-6 bg-slate-200" />
+                                  <div className="flex flex-col">
+                                    <span className="font-semibold text-slate-900">
+                                      {avg != null ? avg.toFixed(1) : '—'}
+                                    </span>
+                                    <span className="uppercase tracking-wide text-slate-500">
+                                      Prosjek
+                                    </span>
+                                  </div>
+                                  {/* Historija ocjena se otvara kroz accordion ispod, bez dodatnog dugmeta ovdje */}
                                 </div>
                               </div>
-                            </div>
 
-                            {/* Lekcija + ocjene */}
-                            <div className="flex flex-col gap-2">
-                              {/* Wrapper je relative da dropdown može "plutati" iznad bez pomjeranja layouta */}
-                              <div
-                                className="relative"
-                                ref={openLessonStudentId === student.id ? lessonDropdownRef : null}
-                              >
-                                <svg
-                                  className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
+                              {/* Lekcija + ocjene */}
+                              <div className="flex flex-col gap-2">
+                                <div
+                                  className="relative"
+                                  ref={openLessonStudentId === student.id ? lessonDropdownRef : null}
                                 >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z"
-                                  />
-                                </svg>
-                                {(() => {
-                                  const rawInputValue = lessonInputByStudent[student.id] ?? '';
-                                  const isOpen = openLessonStudentId === student.id;
+                                  <svg
+                                    className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={2}
+                                      d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z"
+                                    />
+                                  </svg>
+                                  {(() => {
+                                    const rawInputValue = lessonInputByStudent[student.id] ?? '';
+                                    const isOpen = openLessonStudentId === student.id;
 
-                                  // Kada je dropdown otvoren, koristimo raw input (search).
-                                  // Kada je zatvoren, prikazujemo naziv trenutno odabrane lekcije.
-                                  const displayValue =
-                                    isOpen && rawInputValue.length > 0
-                                      ? rawInputValue
-                                      : selectedLessonId
-                                        ? lessons.find((l) => l.id === selectedLessonId)?.naslov ?? ''
-                                        : '';
+                                    const displayValue =
+                                      isOpen && rawInputValue.length > 0
+                                        ? rawInputValue
+                                        : selectedLessonId
+                                          ? lessons.find((l) => l.id === selectedLessonId)?.naslov ??
+                                            ''
+                                          : '';
 
-                                  const filterTerm = isOpen ? rawInputValue : '';
-                                  const filteredLessonsForStudent =
-                                    filterTerm.trim().length === 0
-                                      ? lessons
-                                      : lessons.filter((l) =>
-                                          l.naslov.toLowerCase().includes(filterTerm.toLowerCase()),
-                                        );
-                                  return (
-                                    <>
-                                      <input
-                                        value={displayValue}
-                                        onChange={(e) => {
-                                          const value = e.target.value;
-                                          setLessonInputByStudent((prev) => ({
-                                            ...prev,
-                                            [student.id]: value,
-                                          }));
-                                          setOpenLessonStudentId(student.id);
-                                        }}
-                                        onFocus={() => setOpenLessonStudentId(student.id)}
-                                        onClick={() => setOpenLessonStudentId(student.id)}
-                                        placeholder="Počni tipkati naziv lekcije..."
-                                        className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                      />
-                                      {/* Ikonica za "prikaži sve" / toggle dropdowna */}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setLessonInputByStudent((prev) => ({
-                                            ...prev,
-                                            [student.id]: '',
-                                          }));
-                                          setOpenLessonStudentId((current) =>
-                                            current === student.id ? null : student.id,
+                                    const filterTerm = isOpen ? rawInputValue : '';
+                                    const filteredLessonsForStudent =
+                                      filterTerm.trim().length === 0
+                                        ? lessons
+                                        : lessons.filter((l) =>
+                                            l.naslov
+                                              .toLowerCase()
+                                              .includes(filterTerm.toLowerCase()),
                                           );
-                                        }}
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center justify-center rounded-md p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                                      >
-                                        <svg
-                                          className={`w-4 h-4 transition-transform ${
-                                            openLessonStudentId === student.id ? 'rotate-180' : ''
-                                          }`}
-                                          fill="none"
-                                          stroke="currentColor"
-                                          viewBox="0 0 24 24"
-                                        >
-                                          <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M19 9l-7 7-7-7"
-                                          />
-                                        </svg>
-                                      </button>
-                                      {openLessonStudentId === student.id &&
-                                        filteredLessonsForStudent.length > 0 && (
-                                          <div className="absolute left-0 right-0 top-full mt-1 max-h-44 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg z-40">
-                                            <ul className="py-1 text-sm text-slate-700">
-                                              {filteredLessonsForStudent.map((l) => (
-                                                <li key={l.id}>
-                                                  <button
-                                                    type="button"
-                                                    className={`flex w-full items-center justify-between px-3 py-1.5 text-left hover:bg-slate-50 ${
-                                                      selectedLessonId === l.id
-                                                        ? 'bg-slate-50 font-semibold text-slate-900'
-                                                        : ''
-                                                    }`}
-                                                  onClick={() => {
-                                                    // Postavi odabranu lekciju, ali očisti search
-                                                    setSelectedLessonByStudent((prev) => ({
-                                                      ...prev,
-                                                      [student.id]: l.id,
-                                                    }));
-                                                    setLessonInputByStudent((prev) => ({
-                                                      ...prev,
-                                                      [student.id]: '',
-                                                    }));
-                                                    setOpenLessonStudentId(null);
-                                                  }}
-                                                  >
-                                                    <span className="truncate">{l.naslov}</span>
-                                                  </button>
-                                                </li>
-                                              ))}
-                                            </ul>
-                                          </div>
-                                        )}
-                                    </>
-                                  );
-                                })()}
-                              </div>
-                              <div className="flex items-center gap-1">
-                                {[5, 4, 3, 2, 1].map((g) => {
-                                  const active = record.ocjena === g;
-                                  return (
-                                    <button
-                                      key={g}
-                                      onClick={() =>
-                                        selectedLessonId &&
-                                        updateOcjena(selectedLessonId, student.id, g)
-                                      }
-                                      className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-all ${
-                                        active
-                                          ? getActiveGradeClasses(g)
-                                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-200 hover:text-blue-700'
-                                      }`}
-                                    >
-                                      {g}
-                                    </button>
-                                  );
-                                })}
-                                <button
-                                  onClick={() =>
-                                    selectedLessonId &&
-                                    updateOcjena(selectedLessonId, student.id, null)
-                                  }
-                                  className="w-10 h-10 rounded-lg border border-slate-200 text-xs text-slate-500 hover:border-rose-200 hover:text-rose-600"
-                                  title="Obriši ocjenu"
-                                >
-                                  ×
-                                </button>
-                              </div>
-                            </div>
 
-                            {/* Komentar */}
-                            <textarea
-                              value={record.komentar}
-                              onChange={(e) =>
-                                selectedLessonId &&
-                                updateOcjena(
-                                  selectedLessonId,
-                                  student.id,
-                                  record.ocjena,
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Kratak komentar (opcionalno)"
-                              rows={3}
-                              className="w-full rounded-lg border border-slate-200 px-3 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white align-top"
-                            />
-                          </div>
-                        );
-                      })}
+                                    return (
+                                      <>
+                                        <input
+                                          value={displayValue}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            setLessonInputByStudent((prev) => ({
+                                              ...prev,
+                                              [student.id]: value,
+                                            }));
+                                            setOpenLessonStudentId(student.id);
+                                          }}
+                                          onFocus={() => setOpenLessonStudentId(student.id)}
+                                          onClick={() => setOpenLessonStudentId(student.id)}
+                                          placeholder="Počni tipkati naziv lekcije..."
+                                          className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setLessonInputByStudent((prev) => ({
+                                              ...prev,
+                                              [student.id]: '',
+                                            }));
+                                            setOpenLessonStudentId((current) =>
+                                              current === student.id ? null : student.id,
+                                            );
+                                          }}
+                                          className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center justify-center rounded-md p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                                        >
+                                          <svg
+                                            className={`w-4 h-4 transition-transform ${
+                                              openLessonStudentId === student.id ? 'rotate-180' : ''
+                                            }`}
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                          >
+                                            <path
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                              strokeWidth={2}
+                                              d="M19 9l-7 7-7-7"
+                                            />
+                                          </svg>
+                                        </button>
+                                        {openLessonStudentId === student.id &&
+                                          filteredLessonsForStudent.length > 0 && (
+                                            <div className="absolute left-0 right-0 top-full mt-1 max-h-44 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg z-40">
+                                              <ul className="py-1 text-sm text-slate-700">
+                                                {filteredLessonsForStudent.map((l) => (
+                                                  <li key={l.id}>
+                                                    <button
+                                                      type="button"
+                                                      className={`flex w-full items-center justify-between px-3 py-1.5 text-left hover:bg-slate-50 ${
+                                                        selectedLessonId === l.id
+                                                          ? 'bg-slate-50 font-semibold text-slate-900'
+                                                          : ''
+                                                      }`}
+                                                      onClick={() => {
+                                                        setSelectedLessonByStudent((prev) => ({
+                                                          ...prev,
+                                                          [student.id]: l.id,
+                                                        }));
+                                                        setLessonInputByStudent((prev) => ({
+                                                          ...prev,
+                                                          [student.id]: '',
+                                                        }));
+                                                        setOpenLessonStudentId(null);
+                                                      }}
+                                                    >
+                                                      <span className="truncate">{l.naslov}</span>
+                                                    </button>
+                                                  </li>
+                                                ))}
+                                              </ul>
+                                            </div>
+                                          )}
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {[5, 4, 3, 2, 1].map((g) => {
+                                    const active = record.ocjena === g;
+                                    return (
+                                      <button
+                                        key={g}
+                                        onClick={() =>
+                                          selectedLessonId &&
+                                          updateOcjena(selectedLessonId, student.id, g)
+                                        }
+                                        className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-all ${
+                                          active
+                                            ? getActiveGradeClasses(g)
+                                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-200 hover:text-blue-700'
+                                        }`}
+                                      >
+                                        {g}
+                                      </button>
+                                    );
+                                  })}
+                                  <button
+                                    onClick={() =>
+                                      selectedLessonId &&
+                                      updateOcjena(selectedLessonId, student.id, null)
+                                    }
+                                    className="w-10 h-10 rounded-lg border border-slate-200 text-xs text-slate-500 hover:border-rose-200 hover:text-rose-600"
+                                    title="Obriši ocjenu"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Komentar */}
+                              <textarea
+                                value={record.komentar}
+                                onChange={(e) =>
+                                  selectedLessonId &&
+                                  updateOcjena(
+                                    selectedLessonId,
+                                    student.id,
+                                    record.ocjena,
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder="Kratak komentar (opcionalno)"
+                                rows={3}
+                                className="w-full rounded-lg border border-slate-200 px-3 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white align-top"
+                              />
+
+                              {/* Historija ocjena – accordion za nastavnu godinu */}
+                              {studentLessonStats && studentLessonStats.students?.[student.id] && (
+                                <div className="mt-2 md:col-span-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700">
+                                  {/* Header accordiona – uvijek vidljiv */}
+                                  <button
+                                    type="button"
+                                    className="w-full flex items-center justify-between text-left"
+                                    onClick={() =>
+                                      setExpandedStudentId((prev) =>
+                                        prev === student.id ? null : student.id,
+                                      )
+                                    }
+                                  >
+                                    <div className="flex flex-col">
+                                      <span className="font-semibold text-slate-900">
+                                        Nastavna godina{' '}
+                                        {studentLessonStats.nastavnaGodinaNaziv
+                                          ? `– ${studentLessonStats.nastavnaGodinaNaziv}`
+                                          : ''}
+                                      </span>
+                                      <span className="text-slate-400">
+                                        Historija ocjena za ovog učenika
+                                      </span>
+                                    </div>
+                                    <svg
+                                      className={`w-4 h-4 text-slate-500 transition-transform ${
+                                        showHistoryDetails ? 'rotate-180' : ''
+                                      }`}
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M19 9l-7 7-7-7"
+                                      />
+                                    </svg>
+                                  </button>
+
+                                  {/* Sadržaj accordiona – podijeljen na lijevu (lista) i desnu (graf) stranu */}
+                                  {showHistoryDetails && (
+                                    <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      {/* Lijevo: detaljna lista lekcija i ocjena */}
+                                      <div className="max-h-40 overflow-y-auto pr-1 border border-slate-100 rounded-lg">
+                                        <ul className="divide-y divide-slate-100">
+                                          {studentLessonStats.students[student.id].lessons.map(
+                                            (l, idx) => (
+                                              <li
+                                                key={l.lekcijaId}
+                                                className="py-1.5 px-2 flex flex-col gap-0.5"
+                                              >
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-[10px] font-semibold text-slate-500">
+                                                    {idx + 1}.
+                                                  </span>
+                                                  <span className="font-semibold text-slate-900 truncate">
+                                                    {l.naslov}
+                                                  </span>
+                                                  <span className="ml-auto text-[9px] px-1 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                                                    {l.tip ?? 'LEKCIJA'}
+                                                  </span>
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-600">
+                                                  <span>
+                                                    <span className="font-semibold">Ocjena:</span>{' '}
+                                                    <span>{l.lastGrade}</span>
+                                                  </span>
+                                                  <span>
+                                                    <span className="font-semibold">Datum:</span>{' '}
+                                                    <span>
+                                                      {(() => {
+                                                        const d = new Date(l.lastDate);
+                                                        const day = d
+                                                          .getDate()
+                                                          .toString()
+                                                          .padStart(2, '0');
+                                                        const month = (d.getMonth() + 1)
+                                                          .toString()
+                                                          .padStart(2, '0');
+                                                        const year = d.getFullYear();
+                                                        return `${day}.${month}.${year}.`;
+                                                      })()}
+                                                    </span>
+                                                  </span>
+                                                </div>
+                                                {l.ocjene && l.ocjene.length > 0 && l.ocjene[0].komentar && (
+                                                  <div className="mt-0.5 text-[10px] text-slate-600">
+                                                    <span className="font-semibold">Komentar:</span>{' '}
+                                                    <span>{l.ocjene[0].komentar}</span>
+                                                  </div>
+                                                )}
+                                              </li>
+                                            ),
+                                          )}
+                                        </ul>
+                                      </div>
+
+                                      {/* Desno: graf raspodjele ocjena */}
+                                      <div className="border border-slate-100 rounded-lg p-2 flex flex-col gap-2">
+                                        <span className="text-[11px] font-semibold text-slate-900">
+                                          Graf ocjena
+                                        </span>
+                                        {(() => {
+                                          const buckets = [5, 4, 3, 2, 1];
+                                          const counts: Record<number, number> = {
+                                            5: 0,
+                                            4: 0,
+                                            3: 0,
+                                            2: 0,
+                                            1: 0,
+                                          };
+
+                                          studentLessonStats.students[student.id].lessons.forEach(
+                                            (l) => {
+                                              (l.ocjene || []).forEach((o) => {
+                                                if (o.ocjena >= 1 && o.ocjena <= 5) {
+                                                  counts[o.ocjena] = (counts[o.ocjena] || 0) + 1;
+                                                }
+                                              });
+                                            },
+                                          );
+
+                                          const total =
+                                            buckets.reduce((sum, g) => sum + (counts[g] || 0), 0) ||
+                                            1;
+
+                                          const barColor = (g: number) => {
+                                            switch (g) {
+                                              case 5:
+                                                return 'bg-emerald-500';
+                                              case 4:
+                                                return 'bg-emerald-300';
+                                              case 3:
+                                                return 'bg-amber-300';
+                                              case 2:
+                                                return 'bg-orange-300';
+                                              case 1:
+                                              default:
+                                                return 'bg-rose-300';
+                                            }
+                                          };
+
+                                          return (
+                                            <div className="space-y-1.5">
+                                              {buckets.map((g) => {
+                                                const count = counts[g] || 0;
+                                                const pct = Math.round((count / total) * 100);
+                                                return (
+                                                  <div
+                                                    key={g}
+                                                    className="flex items-center gap-2 text-[11px]"
+                                                  >
+                                                    <span className="w-4 text-right font-semibold text-slate-700">
+                                                      {g}
+                                                    </span>
+                                                    <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                                                      <div
+                                                        className={`h-full ${barColor(
+                                                          g,
+                                                        )} rounded-full`}
+                                                        style={{ width: `${pct}%` }}
+                                                      />
+                                                    </div>
+                                                    <span className="w-10 text-right text-slate-500">
+                                                      {count}x
+                                                    </span>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                     </div>
                   )}
                 </div>
@@ -1303,7 +1607,7 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                       disabled={saving}
                       className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 text-white px-4 py-3 text-sm font-semibold shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-colors disabled:opacity-50"
                     >
-                      {saving ? 'Spremam...' : 'Sačuvaj čas'}
+                      {saving ? 'Spremam...' : isEditing ? 'Ažuriraj čas' : 'Sačuvaj čas'}
                     </button>
                     <button
                       onClick={onClose}

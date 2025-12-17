@@ -92,6 +92,11 @@ export class CasController {
 
     return result;
   }
+
+  @Get('grupa/:grupaId/lekcije-stats')
+  async getLessonsStatsForGroup(@Param('grupaId') grupaId: string) {
+    return this.casService.getLessonsStatsForGroup(grupaId);
+  }
 }
 
 
