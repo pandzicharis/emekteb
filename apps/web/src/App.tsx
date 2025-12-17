@@ -37,7 +37,7 @@ function AppContent() {
       ) : (
         <div className="flex h-screen bg-gray-50">
           <Sidebar isOpen={isSidebarOpen} onToggle={toggleSidebar} />
-          
+
           {/* Main Content */}
           <div
             className={`flex-1 transition-all duration-300 ease-in-out ${
