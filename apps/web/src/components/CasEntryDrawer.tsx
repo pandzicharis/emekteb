@@ -128,7 +128,17 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
         // Statistika lekcija i ocjena za sve učenike grupe
         promises.push(axios.get(`${API_URL}/cas/grupa/${slot.grupa.id}/lekcije-stats`));
         
-        const [lessonsRes, existingCasRes, statsRes] = await Promise.all(promises);
+        // Uvijek dohvati učenike iz grupe (kritično za nove slotove)
+        promises.push(
+          axios
+            .get(`${API_URL}/cas/grupa/${slot.grupa.id}/ucenici`)
+            .catch((err) => {
+              console.error('Error fetching ucenici from endpoint:', err);
+              return { data: null };
+            })
+        );
+        
+        const [lessonsRes, existingCasRes, statsRes, uceniciRes] = await Promise.all(promises);
 
         // Dedup lekcije po ID-u – ako backend vrati duplikate, čuvamo samo prvi zapis
         const rawLessons = lessonsRes.data ?? [];
@@ -140,13 +150,131 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
           }
         });
         const fetchedLessons = Array.from(lessonsById.values());
-        const fetchedStudents: Student[] =
-          slot.grupa.ucenici?.map((u) => ({
-            id: u.id,
-            ime: u.ime,
-            prezime: u.prezime,
-            godinaRodjenja: u.godinaRodjenja ?? null,
-          })) ?? [];
+        
+        // Dohvati učenike - kombinuj iz različitih izvora
+        const studentsMap = new Map<string, Student>();
+        
+        // 1. Prvo pokušaj iz direktnog endpointa za učenike iz grupe (najpouzdaniji izvor)
+        if (uceniciRes?.data && Array.isArray(uceniciRes.data) && uceniciRes.data.length > 0) {
+          uceniciRes.data.forEach((u: any) => {
+            if (u.id) {
+              studentsMap.set(u.id, {
+                id: u.id,
+                ime: u.ime || '',
+                prezime: u.prezime || '',
+                godinaRodjenja: u.godinaRodjenja ?? null,
+              });
+            }
+          });
+        }
+        
+        // 2. Pokušaj iz slot.grupa.ucenici (ako su dostupni) - dodaj ako već nisu u mapi
+        if (slot.grupa.ucenici && slot.grupa.ucenici.length > 0) {
+          slot.grupa.ucenici.forEach((u) => {
+            if (u.id && !studentsMap.has(u.id)) {
+              studentsMap.set(u.id, {
+                id: u.id,
+                ime: u.ime || '',
+                prezime: u.prezime || '',
+                godinaRodjenja: u.godinaRodjenja ?? null,
+              });
+            }
+          });
+        }
+        
+        // 3. Ako postojeći čas ima prisustva, dodaj učenike iz prisustva (za slučaj da nisu u grupi)
+        // Ovo je važno jer postojeći čas može imati učenike koji nisu u grupi ili imaju bolje podatke
+        if (existingCasRes?.data?.prisustva && existingCasRes.data.prisustva.length > 0) {
+          existingCasRes.data.prisustva.forEach((p: any) => {
+            const ucenikId = p.ucenik?.id || p.ucenikId;
+            if (ucenikId) {
+              // Ako učenik već postoji u mapi, ažuriraj ime/prezime ako su bolji podaci
+              const existingStudent = studentsMap.get(ucenikId);
+              const imeFromPresence = p.ucenik?.korisnik?.ime || p.ucenik?.ime || '';
+              const prezimeFromPresence = p.ucenik?.korisnik?.prezime || p.ucenik?.prezime || '';
+              
+              if (existingStudent) {
+                // Ažuriraj ime/prezime ako su prazni ili ako su bolji podaci iz prisustva
+                if ((!existingStudent.ime && imeFromPresence) || (!existingStudent.prezime && prezimeFromPresence)) {
+                  studentsMap.set(ucenikId, {
+                    ...existingStudent,
+                    ime: existingStudent.ime || imeFromPresence,
+                    prezime: existingStudent.prezime || prezimeFromPresence,
+                  });
+                }
+              } else {
+                // Dodaj novog učenika iz prisustva
+                studentsMap.set(ucenikId, {
+                  id: ucenikId,
+                  ime: imeFromPresence,
+                  prezime: prezimeFromPresence,
+                  godinaRodjenja: p.ucenik?.datumRodjenja 
+                    ? new Date(p.ucenik.datumRodjenja).getFullYear() 
+                    : null,
+                });
+              }
+            }
+          });
+        }
+        
+        // 4. Ako još uvijek nema učenika, pokušaj sa dashboard endpointom (fallback)
+        if (studentsMap.size === 0) {
+          try {
+            const dashboardRes = await axios.get(`${API_URL}/muallimi/dashboard`, {
+              params: { dan: slot.dan },
+            });
+            
+            // Pronađi grupu u dashboard podacima - prvo u razredima
+            let grupa = dashboardRes.data?.razredi
+              ?.flatMap((r: any) => r.grupe || [])
+              .find((g: any) => g.id === slot.grupa.id);
+            
+            // Ako nije u razredima, pokušaj u raspored objektu
+            if (!grupa) {
+              const rasporedItem = dashboardRes.data?.raspored?.find((r: any) => 
+                r.grupa?.id === slot.grupa.id
+              );
+              if (rasporedItem?.grupa) {
+                grupa = rasporedItem.grupa;
+              }
+            }
+            
+            // Ako je grupa pronađena i ima učenike, dodaj ih
+            if (grupa?.ucenici && grupa.ucenici.length > 0) {
+              grupa.ucenici.forEach((u: any) => {
+                if (u.id) {
+                  studentsMap.set(u.id, {
+                    id: u.id,
+                    ime: u.ime || '',
+                    prezime: u.prezime || '',
+                    godinaRodjenja: u.godinaRodjenja ?? null,
+                  });
+                }
+              });
+            }
+          } catch (dashboardErr) {
+            console.error('Error fetching students from dashboard:', dashboardErr);
+          }
+        }
+        
+        // 5. Ako statistika ima učenike, dodaj ih (za slučaj da nisu u prethodnim izvorima)
+        if (statsRes?.data?.students && studentsMap.size === 0) {
+          Object.values(statsRes.data.students).forEach((s: any) => {
+            if (s.ucenikId && !studentsMap.has(s.ucenikId)) {
+              studentsMap.set(s.ucenikId, {
+                id: s.ucenikId,
+                ime: '', // Statistika možda nema ime/prezime
+                prezime: '',
+                godinaRodjenja: null,
+              });
+            }
+          });
+        }
+        
+        const fetchedStudents = Array.from(studentsMap.values());
+        
+        // Debug log za provjeru
+        console.log('Fetched students:', fetchedStudents.length, fetchedStudents);
 
         // Inicijalizuj podrazumijevane vrednosti
         const defaultPresence: Record<string, PrisustvoStatus> = {};
@@ -888,12 +1016,13 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                         >
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-sm font-semibold text-slate-700">
-                              {student.ime.charAt(0)}
-                              {student.prezime.charAt(0)}
+                              {(student.ime || '').charAt(0).toUpperCase()}
+                              {(student.prezime || '').charAt(0).toUpperCase()}
                             </div>
                             <div className="space-y-1">
                               <div className="text-sm font-semibold text-slate-900 leading-tight">
-                                {student.ime} {student.prezime}
+                                {student.ime || ''} {student.prezime || ''}
+                                {!student.ime && !student.prezime && <span className="text-slate-400 italic">Nepoznat učenik</span>}
                               </div>
                             </div>
                           </div>

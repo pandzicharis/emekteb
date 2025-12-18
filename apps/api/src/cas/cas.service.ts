@@ -586,6 +586,51 @@ export class CasService {
 
     return result;
   }
+
+  /**
+   * Vraća listu učenika iz grupe
+   */
+  async getUceniciFromGrupa(grupaId: string) {
+    if (!grupaId) {
+      throw new BadRequestException('grupaId je obavezan');
+    }
+
+    const grupa = await this.prisma.grupa.findUnique({
+      where: { id: grupaId },
+      include: {
+        ucenici: {
+          include: {
+            ucenik: {
+              select: {
+                id: true,
+                datumRodjenja: true,
+                korisnik: {
+                  select: {
+                    id: true,
+                    ime: true,
+                    prezime: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!grupa) {
+      throw new NotFoundException('Grupa nije pronađena');
+    }
+
+    return grupa.ucenici.map((ug) => ({
+      id: ug.ucenik.id,
+      ime: ug.ucenik.korisnik?.ime ?? '',
+      prezime: ug.ucenik.korisnik?.prezime ?? '',
+      godinaRodjenja: ug.ucenik.datumRodjenja
+        ? new Date(ug.ucenik.datumRodjenja).getFullYear()
+        : null,
+    }));
+  }
 }
 
 

@@ -1,6 +1,9 @@
 import { useEffect, useState, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import CasoviDateFilter from '../components/CasoviDateFilter';
+import CasEntryDrawer from '../components/CasEntryDrawer';
+import { RasporedItem } from '../types/raspored';
 
 const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
 
@@ -56,6 +59,11 @@ export default function CasoviPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCas, setSelectedCas] = useState<Cas | null>(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [selectedFilterDate, setSelectedFilterDate] = useState<Date | null>(null);
+  const [showCasDrawer, setShowCasDrawer] = useState(false);
+  const [selectedSlotForDrawer, setSelectedSlotForDrawer] = useState<RasporedItem | null>(null);
+  const [selectedSlotDate, setSelectedSlotDate] = useState<Date | null>(null);
 
   // Helper: pronađi subotu za dati datum (uvijek ide unazad do prošle subote)
   const getSaturdayForDate = (date: Date) => {
@@ -68,6 +76,7 @@ export default function CasoviPage() {
   };
 
   // Helper: jača boja po ilmihalu (za vertikalnu liniju unutar slota – isti princip kao na MuallimDashboardPage)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getIlmihalAccentClass = (ilmihal: string) => {
     const normalized = (ilmihal || '').trim().toUpperCase();
 
@@ -105,11 +114,80 @@ export default function CasoviPage() {
     return Math.max(0, Math.min(TIMELINE_HEIGHT, position));
   };
 
+  // Helper functions for current time detection
+  const isTodayWeekend = () => {
+    const today = new Date();
+    const day = today.getDay();
+    return day === 0 || day === 6; // 0 = nedjelja, 6 = subota
+  };
+
+  const getTodayWeekendDay = (): 'subota' | 'nedjelja' | null => {
+    const today = new Date();
+    const day = today.getDay();
+    if (day === 6) return 'subota';
+    if (day === 0) return 'nedjelja';
+    return null;
+  };
+
+  const isSlotActive = (cas: Cas, slotDate: Date): boolean => {
+    if (!isTodayWeekend()) return false;
+    
+    const todayDay = getTodayWeekendDay();
+    if (!todayDay || cas.raspored.dan !== todayDay) return false;
+    
+    // Provjeri da li je datum isti kao danas
+    const today = new Date();
+    const slotDateOnly = new Date(slotDate);
+    today.setHours(0, 0, 0, 0);
+    slotDateOnly.setHours(0, 0, 0, 0);
+    if (today.getTime() !== slotDateOnly.getTime()) return false;
+    
+    const now = currentTime;
+    const [hours, minutes] = cas.raspored.slot.split(':').map(Number);
+    const startTime = new Date(slotDate);
+    startTime.setHours(hours, minutes, 0, 0);
+    
+    const endTime = new Date(startTime);
+    endTime.setMinutes(endTime.getMinutes() + cas.raspored.trajanje);
+    
+    return now >= startTime && now <= endTime;
+  };
+
+  const getCurrentTimePosition = (slotDate: Date): number | null => {
+    if (!isTodayWeekend()) return null;
+    
+    const today = new Date();
+    const slotDateOnly = new Date(slotDate);
+    today.setHours(0, 0, 0, 0);
+    slotDateOnly.setHours(0, 0, 0, 0);
+    if (today.getTime() !== slotDateOnly.getTime()) return null;
+    
+    const now = currentTime;
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    const timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    
+    // Only show if within timeline hours
+    if (hours < TIMELINE_START_HOUR || hours >= TIMELINE_END_HOUR) return null;
+    
+    return timeToPosition(timeString);
+  };
+
   // Generiši osnovnu boju prema statusu slota:
+  // - aktivni slotovi (trenutno se odvijaju): potpuno plavi
   // - budući slotovi: plavi
   // - prošli slotovi sa časom: zeleni
   // - prošli slotovi bez časa: žuti
   const getSlotStatusClass = (slotDate: Date, cas: Cas, variant: 'chip' | 'block' = 'block') => {
+    const isActive = isSlotActive(cas, slotDate);
+    
+    if (isActive) {
+      // Aktivni slotovi – potpuno plavi
+      return variant === 'chip'
+        ? 'bg-blue-600 border-[0.5px] border-blue-500/30 text-white shadow-lg'
+        : 'bg-blue-600 border-[0.5px] border-blue-500/30 text-white shadow-lg';
+    }
+
     const now = new Date();
     const [h, m] = cas.raspored.slot.split(':').map(Number);
     const start = new Date(slotDate);
@@ -140,6 +218,13 @@ export default function CasoviPage() {
 
   // Helper za lijevi border (deblji i jača nijansa)
   const getLeftBorderClass = (slotDate: Date, cas: Cas) => {
+    const isActive = isSlotActive(cas, slotDate);
+    
+    if (isActive) {
+      // Aktivni slotovi – tamniji plavi border
+      return 'border-l-4 border-l-blue-800';
+    }
+
     const now = new Date();
     const [h, m] = cas.raspored.slot.split(':').map(Number);
     const start = new Date(slotDate);
@@ -162,29 +247,100 @@ export default function CasoviPage() {
     return 'border-l-4 border-l-blue-400';
   };
 
-  // Helper za boju eventa u modal-u
-  const getEventColor = (cas: Cas) => {
+
+  // Konvertuj Cas u RasporedItem format za drawer
+  const convertCasToRasporedItem = (cas: Cas): RasporedItem => {
+    const [startHours, startMinutes] = cas.raspored.slot.split(':').map(Number);
+    const totalEndMinutes = startMinutes + cas.raspored.trajanje;
+    const endHours = startHours + Math.floor(totalEndMinutes / 60);
+    const endMins = totalEndMinutes % 60;
+    const endTime = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
+
+    // Izvuci učenike iz prisustva (ako postoje)
+    const ucenici = cas.prisustva?.map((p) => ({
+      id: p.ucenikId,
+      ime: p.ucenik.ime,
+      prezime: p.ucenik.prezime,
+      godinaRodjenja: null,
+    })) || [];
+
+    return {
+      id: cas.raspored.id,
+      dan: cas.raspored.dan,
+      slot: cas.raspored.slot,
+      lokacija: cas.raspored.lokacija,
+      trajanje: cas.raspored.trajanje,
+      startTime: cas.raspored.slot,
+      endTime: endTime,
+      grupa: {
+        id: cas.raspored.grupa.id,
+        naziv: cas.raspored.grupa.naziv,
+        razred: {
+          id: cas.raspored.grupa.razred.id,
+          name: cas.raspored.grupa.razred.name,
+          ilmihal: cas.raspored.grupa.razred.ilmihal,
+        },
+        kuran: false, // Nije dostupno u Cas tipu, postavljamo na false
+        sufara: false, // Nije dostupno u Cas tipu, postavljamo na false
+        brojUcenika: ucenici.length,
+        ucenici: ucenici.length > 0 ? ucenici : undefined, // Postavi samo ako ima učenika
+      },
+      trenutniCasId: cas.id,
+    };
+  };
+
+  // Provjeri da li je slot prošao
+  const isPastSlot = (cas: Cas, slotDate: Date): boolean => {
     const now = new Date();
     const [h, m] = cas.raspored.slot.split(':').map(Number);
-    const slotDate = new Date(cas.datum);
     const start = new Date(slotDate);
     start.setHours(h, m, 0, 0);
     const end = new Date(start);
     end.setMinutes(end.getMinutes() + cas.raspored.trajanje);
+    
+    return end < now;
+  };
 
-    const isPast = end < now;
+  // Provjeri da li je slot danas
+  const isTodaySlot = (cas: Cas, slotDate: Date): boolean => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const slotDateOnly = new Date(slotDate);
+    slotDateOnly.setHours(0, 0, 0, 0);
+    
+    return today.getTime() === slotDateOnly.getTime();
+  };
 
-    if (isPast) {
-      if (cas.imaCas) {
-        return { bg: 'bg-emerald-100', text: 'text-emerald-600' };
-      }
-      return { bg: 'bg-amber-100', text: 'text-amber-600' };
+  // Provjeri da li je slot budući
+  const isFutureSlot = (cas: Cas, slotDate: Date): boolean => {
+    const now = new Date();
+    const [h, m] = cas.raspored.slot.split(':').map(Number);
+    const start = new Date(slotDate);
+    start.setHours(h, m, 0, 0);
+    
+    return start > now;
+  };
+
+  // Handler za klik na slot
+  const handleSlotClick = (cas: Cas, slotDate: Date) => {
+    const past = isPastSlot(cas, slotDate);
+    const today = isTodaySlot(cas, slotDate);
+    const future = isFutureSlot(cas, slotDate);
+    
+    // Ako je slot prošao ili je danas, otvori drawer
+    if (past || today) {
+      const rasporedItem = convertCasToRasporedItem(cas);
+      setSelectedSlotForDrawer(rasporedItem);
+      setSelectedSlotDate(slotDate);
+      setShowCasDrawer(true);
+    } else if (future) {
+      // Za buduće slotove, otvori minimalni modal
+      setSelectedCas(cas);
     }
-
-    return { bg: 'bg-blue-100', text: 'text-blue-600' };
   };
 
   // Izračunaj opseg datuma na osnovu view-a i trenutnog datuma (samo vikend dani)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const dateRange = useMemo(() => {
     const start = new Date(currentDate);
     const end = new Date(currentDate);
@@ -257,9 +413,10 @@ export default function CasoviPage() {
             setCurrentDate(start);
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Error fetching casovi:', err);
-        setError(err.response?.data?.message || 'Greška pri učitavanju časova');
+        const errorMessage = err && typeof err === 'object' && 'response' in err && err.response && typeof err.response === 'object' && 'data' in err.response && err.response.data && typeof err.response.data === 'object' && 'message' in err.response.data && typeof err.response.data.message === 'string' ? err.response.data.message : 'Greška pri učitavanju časova';
+        setError(errorMessage);
         setCasovi([]);
         setNastavnaGodina(null);
       } finally {
@@ -272,12 +429,22 @@ export default function CasoviPage() {
     }
   }, [user]);
 
+  // Update current time every second for timer
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Kada se prebaci na prikaz dana, postavi najbližu subotu
   useEffect(() => {
     if (view === 'day') {
       const saturday = getSaturdayForDate(new Date());
       setCurrentDate(saturday);
     }
+    // Resetuj filter kada se promijeni view
+    setSelectedFilterDate(null);
   }, [view]);
 
   const navigateDate = (direction: 'prev' | 'next' | 'today') => {
@@ -514,23 +681,19 @@ export default function CasoviPage() {
                 ? allDayCasovi.filter((cas) => cas.raspored.dan === expectedDan)
                 : [];
 
-              const isToday = date.toDateString() === new Date().toDateString();
               const isCurrentMonth = date.getMonth() === currentDate.getMonth();
-              const dayName = dayOfWeek === 6 ? 'Subota' : 'Nedjelja';
 
               return (
                 <div
                   key={dateKey}
                   className={`min-h-[120px] border-b border-r border-gray-200 p-3 transition-colors ${
                     isCurrentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50'
-                  } ${isToday ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''}`}
+                  }`}
                 >
                   <div className="mb-3 flex items-baseline gap-1.5">
                     <div
                       className={`text-xl font-bold ${
-                        isToday
-                          ? 'text-blue-600'
-                          : isCurrentMonth
+                        isCurrentMonth
                           ? 'text-gray-900'
                           : 'text-gray-400'
                       }`}
@@ -539,9 +702,7 @@ export default function CasoviPage() {
                     </div>
                     <div
                       className={`text-xs font-light ${
-                        isToday
-                          ? 'text-blue-500'
-                          : isCurrentMonth
+                        isCurrentMonth
                           ? 'text-gray-500'
                           : 'text-gray-400'
                       }`}
@@ -559,7 +720,6 @@ export default function CasoviPage() {
                       const endTime = `${String(endHours).padStart(2, '0')}:${String(
                         endMins,
                       ).padStart(2, '0')}`;
-                          const duration = cas.raspored.trajanje;
                           const statusClass = getSlotStatusClass(date, cas, 'chip');
                       const grupaLabel =
                         cas.raspored.grupa.naziv === 'A'
@@ -568,10 +728,13 @@ export default function CasoviPage() {
                           ? 'Grupa 2'
                           : `Grupa ${cas.raspored.grupa.naziv}`;
 
+                      const slotDate = new Date(date);
+                      slotDate.setHours(0, 0, 0, 0);
+                      
                       return (
                         <button
                           key={cas.id || cas.raspored.id}
-                          onClick={() => setSelectedCas(cas)}
+                          onClick={() => handleSlotClick(cas, slotDate)}
                           className={`w-full text-left text-[11px] px-2 py-1.5 rounded-md cursor-pointer transition-all duration-150 ${statusClass} ${getLeftBorderClass(date, cas)} ${
                             cas.imaCas ? 'font-medium hover:shadow-md' : 'font-normal hover:shadow-sm'
                           }`}
@@ -617,7 +780,10 @@ export default function CasoviPage() {
                         onClick={() => {
                           const allForDay = dayCasovi;
                           if (allForDay.length > 0) {
-                            setSelectedCas(allForDay[0]);
+                            const firstCas = allForDay[0];
+                            const slotDate = new Date(date);
+                            slotDate.setHours(0, 0, 0, 0);
+                            handleSlotClick(firstCas, slotDate);
                           }
                         }}
                         className="w-full text-left text-[10px] text-gray-600 hover:text-gray-900 px-2 py-1 font-medium"
@@ -747,7 +913,7 @@ export default function CasoviPage() {
           </div>
 
           {/* Kolone za dane vikenda */}
-          {days.map((date, idx) => {
+          {days.map((date) => {
             // Generiši dateKey bez timezone problema
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -870,6 +1036,26 @@ export default function CasoviPage() {
                     );
                   })}
 
+                  {/* Current time indicator */}
+                  {(() => {
+                    const currentPos = getCurrentTimePosition(date);
+                    if (currentPos !== null) {
+                      return (
+                        <div
+                          className="absolute left-0 right-0 pointer-events-none z-50"
+                          style={{ top: `${currentPos}px` }}
+                        >
+                          <div className="absolute left-0 right-0 h-0.5 bg-red-500"></div>
+                          <div className="absolute left-2 top-1/2 -translate-y-1/2 bg-red-600 text-white text-xs font-medium px-2 py-1 rounded shadow-md whitespace-nowrap">
+                            {currentTime.toLocaleTimeString('bs-BA', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          <div className="absolute -left-2 top-1/2 -translate-y-1/2 w-3 h-3 bg-red-600 rounded-full border-2 border-white shadow-md"></div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
                   {sorted.map((cas) => {
                     const slotDate = date;
                     const top = timeToPosition(cas.raspored.slot);
@@ -887,6 +1073,7 @@ export default function CasoviPage() {
                     const calculatedHeight = endPosition - top;
                     const height = Math.max(Math.min(calculatedHeight, maxBottom - top), 40);
                     const statusClass = getSlotStatusClass(slotDate, cas, 'block');
+                    const isActive = isSlotActive(cas, slotDate);
                     const columns = cas.stackCount || 1;
                     const indexCol = cas.stackIndex || 0;
                     const widthPct = 100 / columns;
@@ -899,12 +1086,19 @@ export default function CasoviPage() {
                         ? 'Grupa 2'
                         : `Grupa ${cas.raspored.grupa.naziv}`;
 
+                    const slotDateForClick = new Date(date);
+                    slotDateForClick.setHours(0, 0, 0, 0);
+                    
                     return (
                       <button
                         key={cas.id || cas.raspored.id}
-                        onClick={() => setSelectedCas(cas)}
-                        className={`absolute rounded-md px-2.5 py-1.5 text-[11px] cursor-pointer z-10 transition-all duration-150 ${statusClass} ${getLeftBorderClass(slotDate, cas)} ${
-                          cas.imaCas ? 'shadow-md hover:shadow-lg' : 'shadow-sm hover:shadow-md'
+                        onClick={() => handleSlotClick(cas, slotDateForClick)}
+                        className={`absolute rounded-md px-2.5 py-1.5 text-[11px] cursor-pointer transition-all duration-150 ${statusClass} ${getLeftBorderClass(slotDate, cas)} ${
+                          isActive 
+                            ? 'shadow-lg hover:shadow-xl z-40' 
+                            : cas.imaCas 
+                            ? 'shadow-md hover:shadow-lg z-10' 
+                            : 'shadow-sm hover:shadow-md z-10'
                         }`}
                         style={{
                           top: `${top}px`,
@@ -918,30 +1112,30 @@ export default function CasoviPage() {
                         <div className="space-y-1">
                           {/* Početak - Završetak */}
                           <div className="flex items-center gap-1.5">
-                            <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            <span className="font-semibold">
+                            <span className={`font-semibold ${isActive ? 'text-white' : ''}`}>
                               {cas.raspored.slot} - {endTime}
                             </span>
                           </div>
                           {/* Grupa */}
                           <div className="flex items-center gap-1.5">
-                            <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                             </svg>
-                            <span className="truncate">
+                            <span className={`truncate ${isActive ? 'text-white/90' : ''}`}>
                               {cas.raspored.grupa.razred.name} {grupaLabel}
                             </span>
                           </div>
                           {/* Lokacija */}
                           {cas.raspored.lokacija && (
                             <div className="flex items-center gap-1.5">
-                              <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                               </svg>
-                              <span className="truncate text-[10px]">
+                              <span className={`truncate text-[10px] ${isActive ? 'text-white/80' : ''}`}>
                                 {cas.raspored.lokacija === 'divanhana' ? 'Divanhana' : cas.raspored.lokacija === 'ucionica' ? 'Učionica' : cas.raspored.lokacija}
                               </span>
                             </div>
@@ -1160,6 +1354,26 @@ export default function CasoviPage() {
                 );
               })}
 
+              {/* Current time indicator */}
+              {(() => {
+                const currentPos = getCurrentTimePosition(currentDate);
+                if (currentPos !== null) {
+                  return (
+                    <div
+                      className="absolute left-0 right-0 pointer-events-none z-50"
+                      style={{ top: `${currentPos}px` }}
+                    >
+                      <div className="absolute left-0 right-0 h-0.5 bg-red-500"></div>
+                      <div className="absolute left-2 top-1/2 -translate-y-1/2 bg-red-600 text-white text-xs font-medium px-2 py-1 rounded shadow-md whitespace-nowrap">
+                        {currentTime.toLocaleTimeString('bs-BA', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      <div className="absolute -left-2 top-1/2 -translate-y-1/2 w-3 h-3 bg-red-600 rounded-full border-2 border-white shadow-md"></div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
               {sorted.map((cas) => {
                 const slotDate = currentDate;
                 const top = timeToPosition(cas.raspored.slot);
@@ -1174,6 +1388,7 @@ export default function CasoviPage() {
                 const calculatedHeight = endPosition - top;
                 const height = Math.max(Math.min(calculatedHeight, maxBottom - top), 60);
                 const statusClass = getSlotStatusClass(slotDate, cas, 'block');
+                const isActive = isSlotActive(cas, slotDate);
                 const columns = cas.stackCount || 1;
                 const indexCol = cas.stackIndex || 0;
                 const widthPct = 100 / columns;
@@ -1186,12 +1401,19 @@ export default function CasoviPage() {
                     ? 'Grupa 2'
                     : `Grupa ${cas.raspored.grupa.naziv}`;
                 
+                const slotDateForClick = new Date(currentDate);
+                slotDateForClick.setHours(0, 0, 0, 0);
+                
                 return (
                   <button
                     key={cas.id || cas.raspored.id}
-                    onClick={() => setSelectedCas(cas)}
-                    className={`absolute rounded-md px-2.5 py-1.5 text-[11px] cursor-pointer z-10 transition-all duration-150 ${statusClass} ${getLeftBorderClass(slotDate, cas)} ${
-                      cas.imaCas ? 'shadow-md hover:shadow-lg' : 'shadow-sm hover:shadow-md'
+                    onClick={() => handleSlotClick(cas, slotDateForClick)}
+                    className={`absolute rounded-md px-2.5 py-1.5 text-[11px] cursor-pointer transition-all duration-150 ${statusClass} ${getLeftBorderClass(slotDate, cas)} ${
+                      isActive 
+                        ? 'shadow-lg hover:shadow-xl z-40' 
+                        : cas.imaCas 
+                        ? 'shadow-md hover:shadow-lg z-10' 
+                        : 'shadow-sm hover:shadow-md z-10'
                     }`}
                     style={{
                       top: `${top}px`,
@@ -1204,30 +1426,30 @@ export default function CasoviPage() {
                     <div className="space-y-0.5">
                       {/* Početak - Završetak */}
                       <div className="flex items-center gap-1.5">
-                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <span className="font-semibold">
+                        <span className={`font-semibold ${isActive ? 'text-white' : ''}`}>
                           {cas.raspored.slot} - {endTime}
                         </span>
                       </div>
                       {/* Grupa */}
                       <div className="flex items-center gap-1.5">
-                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                         </svg>
-                        <span className="truncate">
+                        <span className={`truncate ${isActive ? 'text-white/90' : ''}`}>
                           {cas.raspored.grupa.razred.name} {grupaLabel}
                         </span>
                       </div>
                       {/* Lokacija */}
                       {cas.raspored.lokacija && (
                         <div className="flex items-center gap-1.5">
-                          <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                           </svg>
-                          <span className="truncate text-[10px]">
+                          <span className={`truncate text-[10px] ${isActive ? 'text-white/80' : ''}`}>
                             {cas.raspored.lokacija === 'divanhana' ? 'Divanhana' : cas.raspored.lokacija === 'ucionica' ? 'Učionica' : cas.raspored.lokacija}
                           </span>
                         </div>
@@ -1271,7 +1493,7 @@ export default function CasoviPage() {
         <div className="mb-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Casovi</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Časovi</h1>
               <p className="text-sm text-gray-600 mt-1">Upravljanje časovima</p>
             </div>
           </div>
@@ -1310,8 +1532,46 @@ export default function CasoviPage() {
               </div>
             </div>
 
-            {/* View Selector */}
-            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 shadow-inner">
+            {/* Filter i View Selector */}
+            <div className="flex items-center gap-3">
+              {/* Filter */}
+              {nastavnaGodina && (
+                <div className="w-64">
+                  <CasoviDateFilter
+                    view={view}
+                    selectedDate={selectedFilterDate}
+                    onDateSelect={(date) => {
+                      setSelectedFilterDate(date);
+                      if (date) {
+                        // Postavi currentDate na odabrani datum ovisno o view-u
+                        if (view === 'month') {
+                          // Za mjesec, postavi prvi dan mjeseca
+                          const firstDay = new Date(date);
+                          firstDay.setDate(1);
+                          firstDay.setHours(0, 0, 0, 0);
+                          setCurrentDate(firstDay);
+                        } else if (view === 'week') {
+                          // Za sedmicu, postavi subotu za taj vikend
+                          const saturday = getSaturdayForDate(date);
+                          setCurrentDate(saturday);
+                        } else {
+                          // Za dan, postavi taj dan direktno
+                          setCurrentDate(date);
+                        }
+                      }
+                    }}
+                    onResetToToday={() => {
+                      setSelectedFilterDate(null);
+                      navigateDate('today');
+                    }}
+                    startDate={new Date(nastavnaGodina.datumOd)}
+                    endDate={new Date(nastavnaGodina.datumDo)}
+                  />
+                </div>
+              )}
+
+              {/* View Selector */}
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 shadow-inner">
               {(['month', 'week', 'day'] as ViewType[]).map((v) => (
                 <button
                   key={v}
@@ -1340,6 +1600,26 @@ export default function CasoviPage() {
                   {v === 'month' ? 'Mjesec' : v === 'week' ? 'Sedmica' : 'Dan'}
                 </button>
               ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Legenda */}
+        <div className="mb-4 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Legenda</h3>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border border-amber-300 bg-amber-50"></div>
+              <span className="text-xs text-gray-700">Prošli časovi bez časa</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border border-emerald-300 bg-emerald-50"></div>
+              <span className="text-xs text-gray-700">Prošli časovi sa čason</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border border-blue-300 bg-blue-50"></div>
+              <span className="text-xs text-gray-700">Budući časovi</span>
             </div>
           </div>
         </div>
@@ -1351,144 +1631,107 @@ export default function CasoviPage() {
           {view === 'day' && renderDayView()}
         </div>
 
-        {/* Event Details Modal */}
-        {selectedCas && (
-          <div 
-            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-            onClick={() => setSelectedCas(null)}
-          >
+        {/* Event Details Modal - samo za buduće slotove */}
+        {selectedCas && (() => {
+          // Provjeri da li je slot budući
+          const slotDate = new Date(selectedCas.datum);
+          slotDate.setHours(0, 0, 0, 0);
+          const isFuture = isFutureSlot(selectedCas, slotDate);
+          
+          // Ako nije budući, ne prikazuj modal (drawer će se otvoriti)
+          if (!isFuture) {
+            return null;
+          }
+
+          // Broj djece - koristimo prisustva ako postoje, inače prikazujemo "N/A"
+          const brojDjece = selectedCas.prisustva?.length ?? 0;
+
+          return (
             <div 
-              className="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+              onClick={() => setSelectedCas(null)}
             >
-              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-gray-900">Detalji termina</h3>
-                <button
-                  onClick={() => setSelectedCas(null)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <div className="p-6">
-                <div className="mb-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${getEventColor(selectedCas).bg} ${getEventColor(selectedCas).text}`}>
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-2xl font-bold text-gray-900">
-                        {selectedCas.raspored.slot} - {(() => {
-                          const [hours, minutes] = selectedCas.raspored.slot.split(':').map(Number);
-                          const endMinutes = minutes + selectedCas.raspored.trajanje;
-                          const endHours = hours + Math.floor(endMinutes / 60);
-                          const finalMinutes = endMinutes % 60;
-                          return `${String(endHours).padStart(2, '0')}:${String(finalMinutes).padStart(2, '0')}`;
-                        })()}
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        {(() => {
-                          const date = new Date(selectedCas.datum);
-                          const days = ['Nedjelja', 'Ponedjeljak', 'Utorak', 'Srijeda', 'Četvrtak', 'Petak', 'Subota'];
-                          const months = ['januar', 'februar', 'mart', 'april', 'maj', 'jun', 'jul', 'avgust', 'septembar', 'oktobar', 'novembar', 'decembar'];
-                          return `${days[date.getDay()]}, ${date.getDate()}. ${months[date.getMonth()]} ${date.getFullYear()}`;
-                        })()}
-                      </div>
-                    </div>
-                  </div>
+              <div 
+                className="bg-white rounded-xl shadow-2xl max-w-md w-full"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-xl">
+                  <h3 className="text-lg font-bold text-gray-900">Detalji termina</h3>
+                  <button
+                    onClick={() => setSelectedCas(null)}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Razred i grupa</div>
+                <div className="p-6">
+                  {/* Datum */}
+                  <div className="mb-4">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Datum</div>
                     <div className="text-base font-semibold text-gray-900">
-                      {selectedCas.raspored.grupa.razred.name} - {selectedCas.raspored.grupa.naziv === 'A' ? 'Grupa 1' : selectedCas.raspored.grupa.naziv === 'B' ? 'Grupa 2' : `Grupa ${selectedCas.raspored.grupa.naziv}`}
+                      {(() => {
+                        const date = new Date(selectedCas.datum);
+                        const days = ['Nedjelja', 'Ponedjeljak', 'Utorak', 'Srijeda', 'Četvrtak', 'Petak', 'Subota'];
+                        const months = ['januar', 'februar', 'mart', 'april', 'maj', 'jun', 'jul', 'avgust', 'septembar', 'oktobar', 'novembar', 'decembar'];
+                        return `${days[date.getDay()]}, ${date.getDate()}. ${months[date.getMonth()]} ${date.getFullYear()}`;
+                      })()}
                     </div>
                   </div>
 
-                  {selectedCas.raspored.lokacija && (
-                    <div>
-                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Lokacija</div>
-                      <div className="text-base text-gray-900 flex items-center gap-2">
-                        <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        {selectedCas.raspored.lokacija === 'divanhana' ? 'Divanhana' : selectedCas.raspored.lokacija === 'ucionica' ? 'Učionica' : selectedCas.raspored.lokacija}
-                      </div>
+                  {/* Razred */}
+                  <div className="mb-4">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Razred</div>
+                    <div className="text-base font-semibold text-gray-900">
+                      {selectedCas.raspored.grupa.razred.name}
                     </div>
-                  )}
+                  </div>
 
-                  {selectedCas.imaCas && (
-                    <>
-                      {selectedCas.lekcije.length > 0 && (
-                        <div>
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Lekcije</div>
-                          <div className="space-y-1">
-                            {selectedCas.lekcije.map((lekcija) => (
-                              <div key={lekcija.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg">
-                                <svg className="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                                </svg>
-                                <span className="text-sm text-gray-900">{lekcija.naslov}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedCas.prisustva.length > 0 && (
-                        <div>
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Prisustvo</div>
-                          <div className="space-y-1">
-                            {selectedCas.prisustva.map((p) => (
-                              <div key={p.ucenikId} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg">
-                                <span className="text-sm text-gray-900">
-                                  {p.ucenik.ime} {p.ucenik.prezime}
-                                </span>
-                                <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                                  p.status === 'PRISUTAN' ? 'bg-green-100 text-green-800' :
-                                  p.status === 'OPRAVDAN' ? 'bg-yellow-100 text-yellow-800' :
-                                  'bg-red-100 text-red-800'
-                                }`}>
-                                  {p.status === 'PRISUTAN' ? 'Prisutan' : p.status === 'OPRAVDAN' ? 'Opravdan' : 'Neopravdan'}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedCas.napomena && (
-                        <div>
-                          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Napomena</div>
-                          <div className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">
-                            {selectedCas.napomena}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {!selectedCas.imaCas && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                      <div className="flex items-center gap-2 text-amber-800">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        <span className="font-semibold">Nema zabilježenog časa za ovaj termin</span>
-                      </div>
+                  {/* Grupa */}
+                  <div className="mb-4">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Grupa</div>
+                    <div className="text-base font-semibold text-gray-900">
+                      {selectedCas.raspored.grupa.naziv === 'A' ? 'Grupa 1' : selectedCas.raspored.grupa.naziv === 'B' ? 'Grupa 2' : `Grupa ${selectedCas.raspored.grupa.naziv}`}
                     </div>
-                  )}
+                  </div>
+
+                  {/* Broj djece */}
+                  <div>
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Broj djece</div>
+                    <div className="text-base font-semibold text-gray-900">
+                      {brojDjece > 0 ? brojDjece : 'N/A'}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
+
+        {/* CasEntryDrawer */}
+        <CasEntryDrawer
+          open={showCasDrawer}
+          slot={selectedSlotForDrawer}
+          slotDate={selectedSlotDate}
+          onClose={() => {
+            setShowCasDrawer(false);
+            setSelectedSlotForDrawer(null);
+            setSelectedSlotDate(null);
+          }}
+          onSave={async () => {
+            // Nakon spremanja, osvježi podatke
+            try {
+              const response = await axios.get(`${API_URL}/cas/muallim/range`);
+              if (response.data) {
+                setNastavnaGodina(response.data.nastavnaGodina || null);
+                setCasovi(response.data.casovi || []);
+              }
+            } catch (err) {
+              console.error('Error refreshing casovi:', err);
+            }
+          }}
+        />
       </div>
     </div>
   );

@@ -2246,7 +2246,7 @@ const renderTimelineSchedule = (
                       return (
                         <div
                           key={`slot-${day}-${idx}`}
-                          className={`absolute rounded-md border-[0.5px] ${styleBase} px-2 py-1 text-[11px] font-medium`}
+                          className={`absolute rounded-md border-[0.5px] ${styleBase} border-l-4 border-l-blue-400 px-2 py-1 text-[11px] font-medium`}
                           style={{
                             top: `${top}px`,
                             height: `${Math.max(height, 22)}px`,
@@ -2279,7 +2279,7 @@ const renderTimelineSchedule = (
                     {/* Selected slot preview - full blue like before, but not added to occupied slots until saved */}
                     {daySelectedTop !== null && dayActive && selectedSlot && (
                       <div
-                        className="absolute left-2 right-2 rounded-lg bg-blue-600 text-white flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl border-[0.5px] border-blue-400"
+                        className="absolute left-2 right-2 rounded-lg bg-blue-600 text-white flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl border-[0.5px] border-blue-400 border-l-4 border-l-blue-800"
                         style={{
                           top: `${daySelectedTop}px`,
                           height: `${Math.max(daySelectedHeight, 40)}px`,

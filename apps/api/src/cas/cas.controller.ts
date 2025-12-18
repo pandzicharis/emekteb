@@ -98,6 +98,11 @@ export class CasController {
     return this.casService.getLessonsStatsForGroup(grupaId);
   }
 
+  @Get('grupa/:grupaId/ucenici')
+  async getUceniciFromGrupa(@Param('grupaId') grupaId: string) {
+    return this.casService.getUceniciFromGrupa(grupaId);
+  }
+
   @Get('muallim/range')
   async getCasoviForMuallim(@Request() req: any) {
     if (!req.user || !req.user.id) {

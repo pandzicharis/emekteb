@@ -935,12 +935,6 @@ export default function MuallimDashboardPage() {
   const totalWeekendHours = Math.round(
     (allSlotsForStats.reduce((sum, item) => sum + item.trajanje, 0) / 60) * 10,
   ) / 10;
-  const todaySlotsForSummary =
-    todayWeekendDay != null ? raspored.filter((item) => item.dan === todayWeekendDay) : [];
-  const pastTodaySlots = todaySlotsForSummary.filter((item) => isSlotPastToday(item));
-  const completedPastTodaySlots = pastTodaySlots.filter((item) => item.imaUnosCasa).length;
-  const allTodaySlotsCompleted =
-    pastTodaySlots.length > 0 && completedPastTodaySlots === pastTodaySlots.length;
   const progress = nastavnaGodina ? calculateProgress(nastavnaGodina.datumOd, nastavnaGodina.datumDo) : 0;
   const currentSlots = getCurrentTimeSlots(raspored);
 
@@ -1075,27 +1069,6 @@ export default function MuallimDashboardPage() {
                 </div>
               );
             })()}
-
-            {/* Sažetak unosa za današnji vikend dan (kada nema više aktivnih časova) – samo ako fale podaci */}
-            {todayIsWeekend &&
-              currentSlots.length === 0 &&
-              todaySlotsForSummary.length > 0 &&
-              !allTodaySlotsCompleted && (
-                <div className="mb-4 w-full bg-gradient-to-br from-amber-50 via-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5 shadow-md relative overflow-hidden">
-                  <div className="absolute inset-0 bg-gradient-to-r from-amber-300/0 via-amber-300/10 to-orange-300/0 pointer-events-none" />
-                  <div className="relative z-10 flex items-center gap-2 text-sm font-semibold text-amber-800">
-                    <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 9v3m0 3h.01M12 2a10 10 0 100 20 10 10 0 000-20z"
-                      />
-                    </svg>
-                    <span>Nisu uneseni podaci za sve grupe danas.</span>
-                  </div>
-                </div>
-              )}
 
             {/* Info banner za naredni čas i vikend statistiku (radni dani, nema LIVE časa) */}
             {currentSlots.length === 0 && !todayIsWeekend && nextClassInfo && timeUntilWeekend && (
@@ -1595,24 +1568,6 @@ export default function MuallimDashboardPage() {
                             </div>
                             {/* Badge na desnoj strani */}
                             <div className="flex-shrink-0 flex flex-col items-end gap-1">
-                              {/* Badge za prošle termine bez casa */}
-                              {isPastSlot && !isCompletedSlot && (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-                                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                  </svg>
-                                  Nema časa
-                                </span>
-                              )}
-                              {/* Badge za termine sa casom */}
-                              {isCompletedSlot && (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                  Čas dodan
-                                </span>
-                              )}
                             </div>
                     </div>
                   </button>
