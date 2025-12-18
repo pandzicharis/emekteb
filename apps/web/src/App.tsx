@@ -9,6 +9,7 @@ import SetupNastavnaGodinaPage from './pages/SetupNastavnaGodinaPage';
 import NastavniPlanPage from './pages/NastavniPlanPage';
 import UpravljanjeLekcijamaPage from './pages/UpravljanjeLekcijamaPage';
 import MuallimiPage from './pages/MuallimiPage';
+import CasoviPage from './pages/CasoviPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function AppContent() {
@@ -52,6 +53,7 @@ function AppContent() {
                 <Route path="/setup-nastavna-godina" element={<ProtectedRoute><SetupNastavnaGodinaPage /></ProtectedRoute>} />
                 <Route path="/nastavni-plan" element={<ProtectedRoute><NastavniPlanPage /></ProtectedRoute>} />
                 <Route path="/lekcije" element={<ProtectedRoute><UpravljanjeLekcijamaPage /></ProtectedRoute>} />
+                <Route path="/casovi" element={<ProtectedRoute><CasoviPage /></ProtectedRoute>} />
                 <Route path="/settings/muallimi" element={<ProtectedRoute allowedRoles={['ADMIN']}><MuallimiPage /></ProtectedRoute>} />
                 <Route path="/login" element={<Navigate to="/" replace />} />
               </Routes>

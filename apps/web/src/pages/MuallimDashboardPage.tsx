@@ -579,6 +579,21 @@ export default function MuallimDashboardPage() {
     return Math.round(progress);
   };
 
+  // Helper funkcija za tamniju boju lijevog bordera na osnovu statusa slota
+  const getLeftBorderClass = (isActive: boolean, isPastSlot: boolean, isCompletedSlot: boolean) => {
+    if (isActive) {
+      return 'border-l-4 border-l-blue-800';
+    }
+    if (isPastSlot && !isCompletedSlot) {
+      return 'border-l-4 border-l-amber-400';
+    }
+    if (isPastSlot && isCompletedSlot) {
+      return 'border-l-4 border-l-emerald-500';
+    }
+    // Budući casovi
+    return 'border-l-4 border-l-blue-400';
+  };
+
   const isTodayWeekend = () => {
     const today = new Date();
     const day = today.getDay();
@@ -1515,8 +1530,8 @@ export default function MuallimDashboardPage() {
                       const actualWidth = `calc(${widthPct}% - ${margin * 2}px)`;
                       const actualLeft = `calc(${leftPct}% + ${margin}px)`;
 
-                return (
-                  <button
+                      return (
+                        <button
                           key={`slot-${slot.dan}-${idx}`}
                           type="button"
                           onClick={() => {
@@ -1526,7 +1541,7 @@ export default function MuallimDashboardPage() {
                             // Spremi datum za drawer
                             setSelectedSlotDate(slotDate);
                           }}
-                          className={`absolute rounded-md ${getSlotStyle()} px-3 py-2 text-[14px] font-medium text-left ${
+                          className={`absolute rounded-md ${getSlotStyle()} ${getLeftBorderClass(isActive, isPastSlot, isCompletedSlot)} px-3 py-2 text-[14px] font-medium text-left ${
                             canOpenDrawerForSlot 
                               ? 'cursor-pointer hover:shadow-md transition-shadow' 
                               : 'cursor-not-allowed opacity-60'
@@ -1549,7 +1564,7 @@ export default function MuallimDashboardPage() {
                                 <div className="flex items-center gap-1.5 truncate flex-1 min-w-0">
                                   <span className={`truncate font-bold ${isActive ? 'text-white' : ''}`}>{slot.start} - {slot.end}</span>
                                   <div className={`text-[11px] font-normal whitespace-nowrap flex-shrink-0 ${isActive ? 'text-white/90' : 'opacity-80'}`}>
-                                    • {formatSlotDate(slotDate)} • {formatSlotDayName(slotDate)}
+                                    • {formatSlotDate(slotDate)}
                                   </div>
                                 </div>
                       </div>
