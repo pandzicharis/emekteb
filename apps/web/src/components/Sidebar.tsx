@@ -47,6 +47,15 @@ const getMenuItems = (uloga: string): MenuEntry[] => {
               </svg>
             ),
           },
+          {
+            path: '/ucenici',
+            name: 'Učenici',
+            icon: (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            ),
+          },
         ],
       }
     );
@@ -147,7 +156,7 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const { user, logout } = useAuth();
   const menuItems = getMenuItems(user?.uloga || '');
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    'Nastava': location.pathname.startsWith('/casovi') || location.pathname.startsWith('/lekcije') || location.pathname.startsWith('/setup-nastavna-godina') || location.pathname.startsWith('/nastavni-plan'),
+    'Nastava': location.pathname.startsWith('/casovi') || location.pathname.startsWith('/lekcije') || location.pathname.startsWith('/setup-nastavna-godina') || location.pathname.startsWith('/nastavni-plan') || location.pathname.startsWith('/ucenici'),
     'Postavke': location.pathname.startsWith('/settings'),
   });
   
@@ -160,7 +169,7 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
       }));
     }
     // Automatski otvori Nastava grupu ako je aktivna ruta
-    if (location.pathname.startsWith('/casovi') || location.pathname.startsWith('/lekcije') || location.pathname.startsWith('/setup-nastavna-godina') || location.pathname.startsWith('/nastavni-plan')) {
+    if (location.pathname.startsWith('/casovi') || location.pathname.startsWith('/lekcije') || location.pathname.startsWith('/setup-nastavna-godina') || location.pathname.startsWith('/nastavni-plan') || location.pathname.startsWith('/ucenici')) {
       setOpenGroups(prev => ({
         ...prev,
         'Nastava': true,

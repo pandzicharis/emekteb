@@ -536,8 +536,9 @@ export class MuallimService {
       const startTime = new Date();
       startTime.setHours(hours, minutes, 0, 0);
       
+      const trajanje = r.trajanje || 45;
       const endTime = new Date(startTime);
-      endTime.setMinutes(endTime.getMinutes() + (r.trajanje || 45));
+      endTime.setMinutes(endTime.getMinutes() + trajanje);
 
       return {
         id: r.id,
@@ -567,7 +568,7 @@ export class MuallimService {
         dan: r.dan,
         slot: r.slot,
         lokacija: r.lokacija,
-        trajanje: r.trajanje,
+        trajanje: trajanje,
         startTime: startTime.toISOString(),
         endTime: endTime.toISOString(),
         // Frontend koristi ovaj flag da vizuelno označi slotove za koje je čas već unesen
