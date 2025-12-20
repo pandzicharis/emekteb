@@ -1,10 +1,11 @@
-.PHONY: help install run down build rebuild logs clean
+.PHONY: help install run start down build rebuild logs clean
 
 # Default target
 help:
 	@echo "E-Mekteb Monorepo - Available commands:"
 	@echo ""
 	@echo "  make install    - Install all dependencies"
+	@echo "  make start      - Start all services with auto-setup (migrations, seed, browser)"
 	@echo "  make run        - Start all services (database, API, frontend)"
 	@echo "  make down       - Stop all services"
 	@echo "  make build      - Build all Docker images"
@@ -21,19 +22,32 @@ help:
 	@echo "  make prisma-migrate  - Run Prisma migrations"
 	@echo "  make prisma-studio  - Open Prisma Studio"
 	@echo ""
+	@echo "Quick start:"
+	@echo "  On Mac/Linux: ./start.sh"
+	@echo "  On Windows:   start.bat"
+	@echo ""
 
 # Install dependencies
 install:
 	@echo "📦 Installing dependencies..."
 	npm install
 
-# Start all services
+# Start all services with full setup (migrations, seed, browser)
+start:
+	@echo "🚀 Starting E-Mekteb with full setup..."
+	@if [ -f "./start.sh" ]; then \
+		./start.sh; \
+	else \
+		echo "❌ start.sh not found. Please run: ./start.sh (Mac/Linux) or start.bat (Windows)"; \
+	fi
+
+# Start all services (simple)
 run:
 	@echo "🚀 Starting all services..."
 	docker compose up -d
 	@echo ""
 	@echo "✅ Services started!"
-	@echo "   - Database: http://localhost:5432"
+	@echo "   - Database: localhost:5439"
 	@echo "   - API: http://localhost:3000"
 	@echo "   - Frontend: http://localhost:5173"
 	@echo ""

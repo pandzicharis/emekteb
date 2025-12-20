@@ -1,7 +1,7 @@
 FROM node:20-slim
 
-# Install OpenSSL for Prisma and procps for ps command (needed by NestJS watch mode)
-RUN apt-get update && apt-get install -y openssl procps && rm -rf /var/lib/apt/lists/*
+# Install OpenSSL for Prisma, procps for ps command, postgresql-client for db checks, and wget for healthchecks
+RUN apt-get update && apt-get install -y openssl procps postgresql-client wget && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
