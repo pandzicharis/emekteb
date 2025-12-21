@@ -213,6 +213,7 @@ export class UcenikService {
         mjestoRodjenja: ucenik.mjestoRodjenja,
         adresaStanovanja: ucenik.adresaStanovanja,
         status: ucenik.status,
+        opis: ucenik.posebnePotrebeOpis || null,
         obrazovanje: ucenik.obrazovanje,
         prosjek: ucenik.prosjek,
         razredNaziv: ucenik.razredNaziv,
@@ -292,6 +293,34 @@ export class UcenikService {
       return null;
     }
 
+    // Calculate prosjek and distribution
+    const nastavnaGodina = await this.getActiveNastavnaGodina();
+    const prosjek = nastavnaGodina ? await this.calculateProsjek(ucenik.id, nastavnaGodina.id) : null;
+    
+    // Calculate prosjek distribution
+    let prosjekDistribution = { excellent: 0, vrlodobar: 0, good: 0, average: 0, poor: 0 };
+    if (nastavnaGodina) {
+      const ocjene = await this.prisma.casOcjena.findMany({
+        where: {
+          ucenikId: ucenik.id,
+          cas: {
+            nastavnaGodinaId: nastavnaGodina.id,
+          },
+        },
+        select: {
+          ocjena: true,
+        },
+      });
+
+      ocjene.forEach((o) => {
+        if (o.ocjena === 5) prosjekDistribution.excellent++;
+        else if (o.ocjena === 4) prosjekDistribution.vrlodobar++;
+        else if (o.ocjena === 3) prosjekDistribution.good++;
+        else if (o.ocjena === 2) prosjekDistribution.average++;
+        else if (o.ocjena === 1) prosjekDistribution.poor++;
+      });
+    }
+
     return {
       id: ucenik.id,
       ime: ucenik.korisnik?.ime || null,
@@ -308,6 +337,182 @@ export class UcenikService {
       roditelji: ucenik.roditelji,
       kontakti: ucenik.kontakti,
       eksterniId: ucenik.eksterniId,
+      prosjek,
+      // Porodični podaci
+      imaRoditelje: ucenik.imaRoditelje,
+      roditeljiZajedno: ucenik.roditeljiZajedno,
+      roditeljiRazdvojeni: ucenik.roditeljiRazdvojeni,
+      roditeljiClanoviIz: ucenik.roditeljiClanoviIz,
+      brojBrace: ucenik.brojBrace,
+      brojSestara: ucenik.brojSestara,
+      tipStambenogObjekta: ucenik.tipStambenogObjekta,
+      imaPosebnePotrebe: ucenik.imaPosebnePotrebe,
+      posebnePotrebeOpis: ucenik.posebnePotrebeOpis,
+      idPunktaDzemata: ucenik.idPunktaDzemata,
+      clanMrezeMladih: ucenik.clanMrezeMladih,
+      ucenikSkoleHifza: ucenik.ucenikSkoleHifza,
+      prosjekDistribution,
     };
+  }
+
+  async update(id: string, updateData: any) {
+    const ucenik = await this.prisma.ucenik.findUnique({
+      where: { id },
+      include: { korisnik: true, obrazovanje: true },
+    });
+
+    if (!ucenik) {
+      throw new Error('Učenik nije pronađen');
+    }
+
+    // Update korisnik data
+    if (ucenik.korisnikId && (updateData.ime || updateData.prezime || updateData.email !== undefined)) {
+      await this.prisma.korisnik.update({
+        where: { id: ucenik.korisnikId },
+        data: {
+          ...(updateData.ime !== undefined && { ime: updateData.ime }),
+          ...(updateData.prezime !== undefined && { prezime: updateData.prezime }),
+          ...(updateData.email !== undefined && { email: updateData.email }),
+        },
+      });
+    }
+
+    // Update ucenik data
+    const ucenikUpdateData: any = {};
+    if (updateData.datumRodjenja !== undefined) ucenikUpdateData.datumRodjenja = updateData.datumRodjenja ? new Date(updateData.datumRodjenja) : null;
+    if (updateData.spol !== undefined) ucenikUpdateData.spol = updateData.spol || null;
+    if (updateData.mjestoRodjenja !== undefined) ucenikUpdateData.mjestoRodjenja = updateData.mjestoRodjenja || null;
+    if (updateData.adresaStanovanja !== undefined) ucenikUpdateData.adresaStanovanja = updateData.adresaStanovanja || null;
+    if (updateData.status !== undefined) ucenikUpdateData.status = updateData.status || null;
+    if (updateData.imaRoditelje !== undefined) ucenikUpdateData.imaRoditelje = updateData.imaRoditelje || null;
+    if (updateData.roditeljiZajedno !== undefined) ucenikUpdateData.roditeljiZajedno = updateData.roditeljiZajedno || null;
+    if (updateData.roditeljiRazdvojeni !== undefined) ucenikUpdateData.roditeljiRazdvojeni = updateData.roditeljiRazdvojeni || null;
+    if (updateData.roditeljiClanoviIz !== undefined) ucenikUpdateData.roditeljiClanoviIz = updateData.roditeljiClanoviIz || null;
+    if (updateData.brojBrace !== undefined) ucenikUpdateData.brojBrace = updateData.brojBrace ?? null;
+    if (updateData.brojSestara !== undefined) ucenikUpdateData.brojSestara = updateData.brojSestara ?? null;
+    if (updateData.tipStambenogObjekta !== undefined) ucenikUpdateData.tipStambenogObjekta = updateData.tipStambenogObjekta || null;
+    if (updateData.imaPosebnePotrebe !== undefined) ucenikUpdateData.imaPosebnePotrebe = updateData.imaPosebnePotrebe;
+    if (updateData.posebnePotrebeOpis !== undefined) ucenikUpdateData.posebnePotrebeOpis = updateData.posebnePotrebeOpis || null;
+    if (updateData.idPunktaDzemata !== undefined) ucenikUpdateData.idPunktaDzemata = updateData.idPunktaDzemata ?? null;
+    if (updateData.clanMrezeMladih !== undefined) ucenikUpdateData.clanMrezeMladih = updateData.clanMrezeMladih || null;
+    if (updateData.ucenikSkoleHifza !== undefined) ucenikUpdateData.ucenikSkoleHifza = updateData.ucenikSkoleHifza || null;
+
+    if (Object.keys(ucenikUpdateData).length > 0) {
+      await this.prisma.ucenik.update({
+        where: { id },
+        data: ucenikUpdateData,
+      });
+    }
+
+    // Update obrazovanje
+    if (updateData.obrazovanje && ucenik.obrazovanje) {
+      await this.prisma.obrazovanje.update({
+        where: { id: ucenik.obrazovanje.id },
+        data: {
+          ...(updateData.obrazovanje.nivoObrazovanja !== undefined && { nivoObrazovanja: updateData.obrazovanje.nivoObrazovanja || null }),
+          ...(updateData.obrazovanje.razred !== undefined && { razred: updateData.obrazovanje.razred ?? null }),
+          ...(updateData.obrazovanje.mektebStepen !== undefined && { mektebStepen: updateData.obrazovanje.mektebStepen || null }),
+          ...(updateData.obrazovanje.predskolskaNaziv !== undefined && { predskolskaNaziv: updateData.obrazovanje.predskolskaNaziv || null }),
+          ...(updateData.obrazovanje.osnovnaNaziv !== undefined && { osnovnaNaziv: updateData.obrazovanje.osnovnaNaziv || null }),
+          ...(updateData.obrazovanje.srednjaNaziv !== undefined && { srednjaNaziv: updateData.obrazovanje.srednjaNaziv || null }),
+          ...(updateData.obrazovanje.fakultetNaziv !== undefined && { fakultetNaziv: updateData.obrazovanje.fakultetNaziv || null }),
+        },
+      });
+    }
+
+    // Return updated ucenik
+    return this.findOne(id);
+  }
+
+  async addOcjena(ucenikId: string, body: { casId: string; lekcijaId: string; ocjena: number; komentar?: string }) {
+    // Provjeri da li učenik postoji
+    const ucenik = await this.prisma.ucenik.findUnique({ where: { id: ucenikId } });
+    if (!ucenik) {
+      throw new Error('Učenik nije pronađen');
+    }
+
+    // Provjeri da li čas postoji
+    const cas = await this.prisma.cas.findUnique({ where: { id: body.casId } });
+    if (!cas) {
+      throw new Error('Čas nije pronađen');
+    }
+
+    // Provjeri da li lekcija postoji
+    const lekcija = await this.prisma.lekcija.findUnique({ where: { id: body.lekcijaId } });
+    if (!lekcija) {
+      throw new Error('Lekcija nije pronađena');
+    }
+
+    // Provjeri da li već postoji ocjena za ovu kombinaciju
+    const existingOcjena = await this.prisma.casOcjena.findFirst({
+      where: {
+        casId: body.casId,
+        ucenikId: ucenikId,
+        lekcijaId: body.lekcijaId,
+      },
+    });
+
+    if (existingOcjena) {
+      // Update postojeće ocjene
+      return this.prisma.casOcjena.update({
+        where: { id: existingOcjena.id },
+        data: {
+          ocjena: body.ocjena,
+          komentar: body.komentar || null,
+        },
+      });
+    } else {
+      // Kreiraj novu ocjenu
+      return this.prisma.casOcjena.create({
+        data: {
+          casId: body.casId,
+          ucenikId: ucenikId,
+          lekcijaId: body.lekcijaId,
+          ocjena: body.ocjena,
+          komentar: body.komentar || null,
+        },
+      });
+    }
+  }
+
+  async addPrisustvo(ucenikId: string, body: { casId: string; status: string }) {
+    // Provjeri da li učenik postoji
+    const ucenik = await this.prisma.ucenik.findUnique({ where: { id: ucenikId } });
+    if (!ucenik) {
+      throw new Error('Učenik nije pronađen');
+    }
+
+    // Provjeri da li čas postoji
+    const cas = await this.prisma.cas.findUnique({ where: { id: body.casId } });
+    if (!cas) {
+      throw new Error('Čas nije pronađen');
+    }
+
+    // Provjeri da li već postoji prisustvo
+    const existingPrisustvo = await this.prisma.casPrisustvo.findFirst({
+      where: {
+        casId: body.casId,
+        ucenikId: ucenikId,
+      },
+    });
+
+    if (existingPrisustvo) {
+      // Update postojećeg prisustva
+      return this.prisma.casPrisustvo.update({
+        where: { id: existingPrisustvo.id },
+        data: {
+          status: body.status as any,
+        },
+      });
+    } else {
+      // Kreiraj novo prisustvo
+      return this.prisma.casPrisustvo.create({
+        data: {
+          casId: body.casId,
+          ucenikId: ucenikId,
+          status: body.status as any,
+        },
+      });
+    }
   }
 }

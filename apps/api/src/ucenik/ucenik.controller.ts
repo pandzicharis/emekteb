@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Get, Put, Post, Param, Query, Body, UseGuards, Logger } from '@nestjs/common';
 import { UcenikService } from './ucenik.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -33,5 +33,23 @@ export class UcenikController {
   @UseGuards(JwtAuthGuard)
   findOne(@Param('id') id: string) {
     return this.ucenikService.findOne(id);
+  }
+
+  @Put(':id')
+  @UseGuards(JwtAuthGuard)
+  update(@Param('id') id: string, @Body() updateData: any) {
+    return this.ucenikService.update(id, updateData);
+  }
+
+  @Post(':id/ocjena')
+  @UseGuards(JwtAuthGuard)
+  addOcjena(@Param('id') id: string, @Body() body: { casId: string; lekcijaId: string; ocjena: number; komentar?: string }) {
+    return this.ucenikService.addOcjena(id, body);
+  }
+
+  @Post(':id/prisustvo')
+  @UseGuards(JwtAuthGuard)
+  addPrisustvo(@Param('id') id: string, @Body() body: { casId: string; status: string }) {
+    return this.ucenikService.addPrisustvo(id, body);
   }
 }

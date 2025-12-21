@@ -66,7 +66,6 @@ echo.
 if !DB_READY! equ 1 (
     echo    ✅ Database is ready
     echo    🔄 Running database migrations...
-    echo    🌱 Seeding database with initial data...
     echo    ✅ Database initialized
 ) else (
     echo    ⚠️  Database initialization in progress...
@@ -149,15 +148,10 @@ echo       Email:    admin@emekteb.ba
 echo       Password: password123
 echo       PIN:      0000
 echo.
-echo    👤 Muallim 1:
-echo       Email:    muallim1@emekteb.ba
+echo    👤 Muallim:
+echo       Email:    muhidin.topcagic@emekteb.ba
 echo       Password: password123
 echo       PIN:      1234
-echo.
-echo    👤 Muallim 2:
-echo       Email:    muallim2@emekteb.ba
-echo       Password: password123
-echo       PIN:      1235
 echo.
 
 REM Open browser

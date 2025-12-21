@@ -853,12 +853,16 @@ export default function MuallimDashboardPage() {
 
     if (!nextDate || !nextSlot) return null;
 
-    const diffMs = nextDate.getTime() - new Date().getTime();
+    // TypeScript type narrowing
+    const finalDate: Date = nextDate;
+    const finalSlot: RasporedItem = nextSlot;
+
+    const diffMs = finalDate.getTime() - new Date().getTime();
     const totalMinutes = Math.max(0, Math.floor(diffMs / 60000));
     const days = Math.floor(totalMinutes / (60 * 24));
     const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
 
-    return { slot: nextSlot, date: nextDate, days, hours };
+    return { slot: finalSlot, date: finalDate, days, hours };
   };
 
   const getTotalWeeklyHours = (): number => {
@@ -927,7 +931,7 @@ export default function MuallimDashboardPage() {
   const todayIsWeekend = isTodayWeekend();
   const todayWeekendDay = getTodayWeekendDay();
   const timeUntilWeekend = !todayIsWeekend ? getTimeUntilNextWeekend() : null;
-  const nextClassInfo = !todayIsWeekend ? getNextClassInfo() : null;
+  const nextClassInfo: { slot: RasporedItem; date: Date; days: number; hours: number } | null = !todayIsWeekend ? getNextClassInfo() : null;
   // Ako je odabran datum u picker-u, koristi selectedDay, inače koristi odabraniDan iz backend-a
   const effectiveSelectedDay = (selectedWeekendDate ? selectedDay : (selectedDay || odabraniDan)) as 'subota' | 'nedjelja';
   const allSlotsForStats = dashboardData.sviRasporedi || raspored;
@@ -982,7 +986,7 @@ export default function MuallimDashboardPage() {
             {/* Current Active Slot Banner */}
             {currentSlots.length > 0 && (() => {
               return (
-                <div className="mb-4 w-full bg-gradient-to-br from-blue-50 via-indigo-50 via-purple-50 to-blue-50 border border-blue-200 rounded-xl p-5 shadow-md relative overflow-hidden transition-all duration-500 ease-out animate-[fadeInSlide_0.5s_ease-out]">
+                <div className="mb-4 w-full bg-gradient-to-br from-blue-50 via-indigo-50 to-blue-50 border border-blue-200 rounded-xl p-5 shadow-md relative overflow-hidden transition-all duration-500 ease-out animate-[fadeInSlide_0.5s_ease-out]">
                   <style>{`
                     @keyframes fadeInSlide {
                       from {
@@ -996,7 +1000,7 @@ export default function MuallimDashboardPage() {
                     }
                   `}</style>
                   {/* Animated background effect */}
-                  <div className="absolute inset-0 bg-gradient-to-r from-blue-400/0 via-indigo-400/10 via-purple-400/10 to-blue-400/0 animate-pulse"></div>
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-400/0 via-indigo-400/10 to-blue-400/0 animate-pulse"></div>
                   {/* Additional subtle gradient overlay */}
                   <div className="absolute inset-0 bg-gradient-to-br from-blue-100/20 via-indigo-100/20 to-purple-100/20"></div>
                   

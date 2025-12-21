@@ -415,8 +415,8 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
               <div className={`flex items-center justify-center ${isOpen ? 'gap-3 min-w-0' : ''}`}>
                 {user.fotografija ? (
                   <img
-                    src={`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}${user.fotografija}`}
-                    alt={user.ime && user.prezime ? `${user.ime} ${user.prezime}` : user.email || 'User'}
+                    src={`${import.meta.env['VITE_API_URL'] || 'http://localhost:3000'}${user.fotografija}`}
+                    alt={user.ime && user.prezime ? `${user.ime} ${user.prezime}` : (user.email || 'User')}
                     className="flex-shrink-0 w-10 h-10 rounded-full object-cover border-2 border-gray-700"
                   />
                 ) : (
