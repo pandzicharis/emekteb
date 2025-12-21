@@ -41,6 +41,12 @@ if ! npm run prisma:seed-nastavni-plan; then
   exit 1
 fi
 
+echo "  📖 Seeding lekcije..."
+if ! npm run prisma:seed-lekcije; then
+  echo "⚠️  Upozorenje: Seed lekcija nije uspješan"
+  echo "   Ovo je opciono - lekcije se mogu dodati i kasnije"
+fi
+
 echo "  📅 Seeding nastavna godina..."
 if ! npm run prisma:seed-nastavna-godina; then
   echo "❌ Greška pri seed-u nastavne godine"
@@ -59,10 +65,28 @@ if ! npm run prisma:seed-grupe; then
   exit 1
 fi
 
-echo "  📖 Seeding casovi..."
+echo "  🔗 Dodavanje učenika u grupe..."
+if ! npm run prisma:seed-ucenici-grupe; then
+  echo "⚠️  Upozorenje: Dodavanje učenika u grupe nije uspješan"
+  echo "   Ovo je opciono - učenici se mogu dodati u grupe i kasnije"
+fi
+
+echo "  📖 Seeding casovi, prisustva i ocjene..."
 if ! npm run prisma:seed-casovi; then
-  echo "⚠️  Upozorenje: Seed casova nije uspješan (možda nema učenika u grupama)"
-  echo "   Ovo je normalno pri prvom pokretanju - casovi će se kreirati kada se učenici dodaju u grupe"
+  echo "⚠️  Upozorenje: Seed casova nije uspješan (možda nema učenika u grupama ili lekcija)"
+  echo "   Ovo je opciono - casovi će se kreirati kada se učenici dodaju u grupe i kada postoje lekcije"
+fi
+
+echo "  📝 Seeding dodatne ocjene za sve učenike i lekcije..."
+if ! npm run prisma:seed-ocjene; then
+  echo "⚠️  Upozorenje: Seed ocjena nije uspješan (možda nema casova ili učenika)"
+  echo "   Ovo je opciono - ocjene će se kreirati kada se casovi kreiraju"
+fi
+
+echo "  🎯 Seeding kompletan seed (popunjava sve tabele sa podacima)..."
+if ! npm run prisma:seed-all; then
+  echo "⚠️  Upozorenje: Kompletan seed nije uspješan"
+  echo "   Ovo je opciono - pokušava da popuni sve tabele sa podacima"
 fi
 
 echo "✅ Database initialization complete!"

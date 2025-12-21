@@ -34,13 +34,13 @@ async function main() {
 
   console.log(`📚 Nastavna godina: ${nastavnaGodina.naziv}`);
 
-  // Generiši datume za zadnja 3 mjeseca (subota i nedjelja)
+  // Generiši datume za zadnjih 6 mjeseci (subota i nedjelja) - više casova!
   const sada = new Date();
   const datumi: Date[] = [];
   
-  // Krećemo od 3 mjeseca unazad
+  // Krećemo od 6 mjeseci unazad
   const pocetak = new Date(sada);
-  pocetak.setMonth(pocetak.getMonth() - 3);
+  pocetak.setMonth(pocetak.getMonth() - 6);
   
   // Generiši sve subote i nedjelje
   for (let d = new Date(pocetak); d <= sada; d.setDate(d.getDate() + 1)) {
@@ -50,7 +50,7 @@ async function main() {
     }
   }
 
-  console.log(`📅 Generisano ${datumi.length} datuma za casove`);
+  console.log(`📅 Generisano ${datumi.length} datuma za casove (zadnjih 6 mjeseci)`);
 
   let ukupnoCasova = 0;
   let ukupnoPrisustva = 0;
@@ -180,36 +180,51 @@ async function main() {
 
           ukupnoPrisustva++;
 
-          // Kreiraj ocjene samo za prisutne učenike
-          if (status === StatusPrisustva.PRISUTAN) {
+          // Kreiraj ocjene za SVE učenike (ne samo prisutne) - 90% šanse
+          // Takođe dodaj ocjene i za opravdane učenike
+          if (status === StatusPrisustva.PRISUTAN || status === StatusPrisustva.OPRAVDAN) {
             for (const lekcija of odabraneLekcije) {
-              // 70% šanse da dobije ocjenu
-              if (Math.random() < 0.7) {
+              // 90% šanse da dobije ocjenu (više ocjena!)
+              if (Math.random() < 0.9) {
                 // Random ocjena između 2 i 5, sa većom vjerovatnoćom za bolje ocjene
                 const rand = Math.random();
                 let ocjena: number;
-                if (rand < 0.3) {
-                  ocjena = 5; // 30% šanse za 5
-                } else if (rand < 0.5) {
+                if (rand < 0.25) {
+                  ocjena = 5; // 25% šanse za 5
+                } else if (rand < 0.45) {
                   ocjena = 4; // 20% šanse za 4
-                } else if (rand < 0.75) {
+                } else if (rand < 0.70) {
                   ocjena = 3; // 25% šanse za 3
                 } else {
-                  ocjena = 2; // 25% šanse za 2
+                  ocjena = 2; // 30% šanse za 2
                 }
 
-                await prisma.casOcjena.create({
-                  data: {
-                    casId: cas.id,
-                    ucenikId: ucenik.id,
-                    lekcijaId: lekcija.id,
-                    ocjena: ocjena,
-                    komentar: ocjena >= 4 ? 'Odličan rad!' : ocjena === 3 ? 'Dobar rad' : 'Treba više vježbe',
-                    vrijeme: new Date(datum.getTime() + Math.random() * 3600000), // Random vrijeme tokom casa
-                  },
-                });
+                const komentari = {
+                  5: ['Odličan rad!', 'Izvrsno!', 'Sjajno urađeno!'],
+                  4: ['Vrlo dobar rad', 'Dobro urađeno'],
+                  3: ['Dobar rad', 'U redu'],
+                  2: ['Treba više vježbe', 'Potrebno više rada'],
+                };
+                const komentar = komentari[ocjena as keyof typeof komentari][
+                  Math.floor(Math.random() * komentari[ocjena as keyof typeof komentari].length)
+                ];
 
-                ukupnoOcjena++;
+                try {
+                  await prisma.casOcjena.create({
+                    data: {
+                      casId: cas.id,
+                      ucenikId: ucenik.id,
+                      lekcijaId: lekcija.id,
+                      ocjena: ocjena,
+                      komentar: komentar,
+                      vrijeme: new Date(datum.getTime() + Math.random() * 3600000), // Random vrijeme tokom casa
+                    },
+                  });
+
+                  ukupnoOcjena++;
+                } catch (error) {
+                  // Možda već postoji (unique constraint) - preskoči
+                }
               }
             }
           }

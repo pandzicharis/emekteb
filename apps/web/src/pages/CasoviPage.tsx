@@ -1534,6 +1534,54 @@ export default function CasoviPage() {
 
             {/* Filter i View Selector */}
             <div className="flex items-center gap-3">
+              {/* View Selector - Month/Week/Day */}
+              <div className="flex items-center gap-0 border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
+                <button
+                  onClick={() => setView('month')}
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
+                    view === 'month'
+                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                  title="Mjesečni prikaz"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>Mjesec</span>
+                </button>
+                <div className="h-6 w-px bg-gray-200"></div>
+                <button
+                  onClick={() => setView('week')}
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
+                    view === 'week'
+                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                  title="Sedmični prikaz"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>Sedmica</span>
+                </button>
+                <div className="h-6 w-px bg-gray-200"></div>
+                <button
+                  onClick={() => setView('day')}
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
+                    view === 'day'
+                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                  title="Dnevni prikaz"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span>Dan</span>
+                </button>
+              </div>
+
               {/* Filter */}
               {nastavnaGodina && (
                 <div className="w-64">
@@ -1595,7 +1643,9 @@ export default function CasoviPage() {
 
         {/* Calendar View */}
         <div className="flex-1 overflow-hidden bg-white rounded-lg shadow-sm border border-gray-200 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:hover:bg-gray-400 [&::-webkit-scrollbar-track]:bg-gray-100">
-          {renderMonthView()}
+          {view === 'month' && renderMonthView()}
+          {view === 'week' && renderWeekView()}
+          {view === 'day' && renderDayView()}
         </div>
 
         {/* Event Details Modal - samo za buduće slotove */}
