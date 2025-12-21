@@ -22,6 +22,22 @@ async function main() {
 
   console.log(`✅ Pronađena aktivna nastavna godina: ${nastavnaGodina.naziv}`);
 
+  // Pronađi muallima (Muhidin Topcagic)
+  const muallimKorisnik = await prisma.korisnik.findUnique({
+    where: { email: 'muhidin.topcagic@emekteb.ba' },
+    include: {
+      ucenik: true,
+    },
+  });
+
+  if (!muallimKorisnik || !muallimKorisnik.ucenik) {
+    console.error('❌ Nema muallima. Prvo pokreni seed.ts');
+    return;
+  }
+
+  const muallimId = muallimKorisnik.ucenik.id;
+  console.log(`✅ Pronađen muallim: ${muallimKorisnik.ime} ${muallimKorisnik.prezime}`);
+
   // Pronađi sve razrede
   const razredi = await prisma.razred.findMany({
     orderBy: {
@@ -50,11 +66,13 @@ async function main() {
     });
 
     if (!razredNG) {
-      // Ako nema razredNastavnaGodina, kreiraj ga (bez muallima)
+      // Ako nema razredNastavnaGodina, kreiraj ga
       razredNG = await prisma.razredNastavnaGodina.create({
         data: {
           nastavnaGodinaId: nastavnaGodina.id,
           razredId: razredRecord.id,
+          muallimId: muallimId,
+          split: true, // Svi razredi su podijeljeni u grupe
         },
       });
     }

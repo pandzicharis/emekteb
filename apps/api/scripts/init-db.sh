@@ -28,7 +28,42 @@ echo "🗄️  Running database migrations..."
 npx prisma migrate deploy
 
 echo "🌱 Seeding database..."
-npm run prisma:seed
+
+echo "  📝 Seeding korisnici (admin i muallim)..."
+if ! npm run prisma:seed; then
+  echo "❌ Greška pri seed-u korisnika"
+  exit 1
+fi
+
+echo "  📚 Seeding nastavni plan..."
+if ! npm run prisma:seed-nastavni-plan; then
+  echo "❌ Greška pri seed-u nastavnog plana"
+  exit 1
+fi
+
+echo "  📅 Seeding nastavna godina..."
+if ! npm run prisma:seed-nastavna-godina; then
+  echo "❌ Greška pri seed-u nastavne godine"
+  exit 1
+fi
+
+echo "  👨‍🎓 Seeding učenici iz CSV..."
+if ! npm run prisma:seed-ucenici; then
+  echo "⚠️  Upozorenje: Seed učenika nije uspješan (možda CSV fajl nije pronađen)"
+  echo "   Ovo je opciono - učenici se mogu importovati i kasnije"
+fi
+
+echo "  👥 Seeding grupe..."
+if ! npm run prisma:seed-grupe; then
+  echo "❌ Greška pri seed-u grupa"
+  exit 1
+fi
+
+echo "  📖 Seeding casovi..."
+if ! npm run prisma:seed-casovi; then
+  echo "⚠️  Upozorenje: Seed casova nije uspješan (možda nema učenika u grupama)"
+  echo "   Ovo je normalno pri prvom pokretanju - casovi će se kreirati kada se učenici dodaju u grupe"
+fi
 
 echo "✅ Database initialization complete!"
 

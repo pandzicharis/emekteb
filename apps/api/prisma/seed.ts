@@ -44,8 +44,33 @@ async function main() {
 
   console.log('✅ Muallim Ucenik zapis kreiran');
 
+  // Kreiraj ADMIN korisnika
+  const admin = await prisma.korisnik.upsert({
+    where: { email: 'admin@emekteb.ba' },
+    update: {
+      lozinka: hashedPassword,
+      ime: 'Admin',
+      prezime: 'Emekteb',
+      uloga: Uloga.ADMIN,
+      aktivan: true,
+      pin: '0000',
+    },
+    create: {
+      email: 'admin@emekteb.ba',
+      lozinka: hashedPassword,
+      ime: 'Admin',
+      prezime: 'Emekteb',
+      uloga: Uloga.ADMIN,
+      aktivan: true,
+      pin: '0000',
+    },
+  });
+
+  console.log('✅ Admin kreiran:', admin.email);
+
   console.log('\n🎉 Seeding completed!');
   console.log('\n📝 Login credentials:');
+  console.log('Admin: admin@emekteb.ba / password123 / PIN: 0000');
   console.log('Muallim: muhidin.topcagic@emekteb.ba / password123 / PIN: 1234');
   console.log('\n💡 Napomena: Učenici će se automatski importovati pri pokretanju aplikacije iz CSV fajla.');
 }
