@@ -296,6 +296,47 @@ export class UcenikService {
     // Calculate prosjek and distribution
     const nastavnaGodina = await this.getActiveNastavnaGodina();
     const prosjek = nastavnaGodina ? await this.calculateProsjek(ucenik.id, nastavnaGodina.id) : null;
+
+    // Razred / grupa / termin za aktivnu nastavnu godinu
+    let razredNaziv: string | null = null;
+    let grupaNaziv: string | null = null;
+    let terminOpis: string | null = null;
+
+    if (nastavnaGodina) {
+      const ucenikGrupa = await this.prisma.ucenikGrupa.findFirst({
+        where: {
+          ucenikId: ucenik.id,
+          grupa: {
+            razredNastavnaGodina: {
+              nastavnaGodinaId: nastavnaGodina.id,
+            },
+          },
+        },
+        include: {
+          grupa: {
+            include: {
+              razredNastavnaGodina: {
+                include: {
+                  razred: true,
+                },
+              },
+              raspored: true,
+            },
+          },
+        },
+      });
+
+      if (ucenikGrupa?.grupa) {
+        razredNaziv = ucenikGrupa.grupa.razredNastavnaGodina?.razred?.name || null;
+        grupaNaziv = ucenikGrupa.grupa.naziv || null;
+
+        const raspored = ucenikGrupa.grupa.raspored;
+        if (raspored) {
+          const danLabel = raspored.dan === 'subota' ? 'Subota' : raspored.dan === 'nedjelja' ? 'Nedjelja' : raspored.dan;
+          terminOpis = `${danLabel} ${raspored.slot}`;
+        }
+      }
+    }
     
     // Calculate prosjek distribution
     let prosjekDistribution = { excellent: 0, vrlodobar: 0, good: 0, average: 0, poor: 0 };
@@ -338,6 +379,9 @@ export class UcenikService {
       kontakti: ucenik.kontakti,
       eksterniId: ucenik.eksterniId,
       prosjek,
+      razredNaziv,
+      grupaNaziv,
+      terminOpis,
       // Porodični podaci
       imaRoditelje: ucenik.imaRoditelje,
       roditeljiZajedno: ucenik.roditeljiZajedno,
@@ -514,5 +558,481 @@ export class UcenikService {
         },
       });
     }
+  }
+
+  async getOcjeneWithLekcije(ucenikId: string) {
+    // Provjeri da li učenik postoji
+    const ucenik = await this.prisma.ucenik.findUnique({ where: { id: ucenikId } });
+    if (!ucenik) {
+      throw new Error('Učenik nije pronađen');
+    }
+
+    // Dohvati aktivnu nastavnu godinu
+    const nastavnaGodina = await this.getActiveNastavnaGodina();
+    if (!nastavnaGodina) {
+      return [];
+    }
+
+    // Dohvati sve ocjene sa lekcijama i casovima
+    const ocjene = await this.prisma.casOcjena.findMany({
+      where: {
+        ucenikId: ucenikId,
+        cas: {
+          nastavnaGodinaId: nastavnaGodina.id,
+        },
+      },
+      include: {
+        lekcija: {
+          select: {
+            id: true,
+            naslov: true,
+          },
+        },
+        cas: {
+          select: {
+            id: true,
+            datum: true,
+          },
+        },
+      },
+      orderBy: {
+        cas: {
+          datum: 'desc',
+        },
+      },
+    });
+
+    // Transformiši podatke
+    return ocjene.map((ocjena) => ({
+      id: ocjena.id,
+      ocjena: ocjena.ocjena,
+      komentar: ocjena.komentar,
+      datum: ocjena.cas.datum,
+      vrijeme: ocjena.vrijeme,
+      lekcija: {
+        id: ocjena.lekcija.id,
+        naslov: ocjena.lekcija.naslov,
+      },
+    }));
+  }
+
+  async getPrisustvoStats(ucenikId: string) {
+    // Provjeri da li učenik postoji
+    const ucenik = await this.prisma.ucenik.findUnique({ where: { id: ucenikId } });
+    if (!ucenik) {
+      throw new Error('Učenik nije pronađen');
+    }
+
+    // Dohvati aktivnu nastavnu godinu
+    const nastavnaGodina = await this.getActiveNastavnaGodina();
+    if (!nastavnaGodina) {
+      return {
+        total: 0,
+        prisutan: 0,
+        opravdan: 0,
+        neopravdan: 0,
+        prisustvoDistribution: {
+          prisutan: 0,
+          opravdan: 0,
+          neopravdan: 0,
+        },
+        prisustva: [],
+      };
+    }
+
+    // Dohvati sva prisustva sa casovima
+    const prisustva = await this.prisma.casPrisustvo.findMany({
+      where: {
+        ucenikId: ucenikId,
+        cas: {
+          nastavnaGodinaId: nastavnaGodina.id,
+        },
+      },
+      include: {
+        cas: {
+          select: {
+            id: true,
+            datum: true,
+          },
+        },
+      },
+      orderBy: {
+        cas: {
+          datum: 'desc',
+        },
+      },
+    });
+
+    // Izračunaj distribuciju
+    const prisustvoDistribution = {
+      prisutan: 0,
+      opravdan: 0,
+      neopravdan: 0,
+    };
+
+    prisustva.forEach((p) => {
+      if (p.status === 'PRISUTAN') prisustvoDistribution.prisutan++;
+      else if (p.status === 'OPRAVDAN') prisustvoDistribution.opravdan++;
+      else if (p.status === 'NEOPRAVDAN') prisustvoDistribution.neopravdan++;
+    });
+
+    const total = prisustva.length;
+
+    // Transformiši podatke
+    return {
+      total,
+      prisutan: prisustvoDistribution.prisutan,
+      opravdan: prisustvoDistribution.opravdan,
+      neopravdan: prisustvoDistribution.neopravdan,
+      prisustvoDistribution,
+      prisustva: prisustva.map((p) => ({
+        id: p.id,
+        status: p.status,
+        napomena: p.napomena,
+        datum: p.cas.datum,
+        kreiran: p.kreiran,
+      })),
+    };
+  }
+
+  async addOcjenaWithDate(ucenikId: string, body: { datum: string; lekcijaId: string; ocjena: number; komentar?: string }) {
+    // Provjeri da li učenik postoji
+    const ucenik = await this.prisma.ucenik.findUnique({ where: { id: ucenikId } });
+    if (!ucenik) {
+      throw new Error('Učenik nije pronađen');
+    }
+
+    // Provjeri da li lekcija postoji
+    const lekcija = await this.prisma.lekcija.findUnique({ where: { id: body.lekcijaId } });
+    if (!lekcija) {
+      throw new Error('Lekcija nije pronađena');
+    }
+
+    // Dohvati aktivnu nastavnu godinu
+    const nastavnaGodina = await this.getActiveNastavnaGodina();
+    if (!nastavnaGodina) {
+      throw new Error('Nema aktivne nastavne godine');
+    }
+
+    // Pronađi grupu učenika za aktivnu nastavnu godinu
+    const ucenikGrupa = await this.prisma.ucenikGrupa.findFirst({
+      where: {
+        ucenikId: ucenikId,
+        grupa: {
+          razredNastavnaGodina: {
+            nastavnaGodinaId: nastavnaGodina.id,
+          },
+        },
+      },
+      include: {
+        grupa: {
+          include: {
+            razredNastavnaGodina: {
+              include: {
+                razred: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!ucenikGrupa) {
+      throw new Error('Učenik nije u grupi za aktivnu nastavnu godinu');
+    }
+
+    const grupa = ucenikGrupa.grupa;
+
+    // Parsiraj datum i odredi dan (subota/nedjelja) kao lokalni datum (bez timezone pomjeranja)
+    const dateParts = body.datum.split('-');
+    if (dateParts.length !== 3) {
+      throw new Error('Neispravan format datuma');
+    }
+    const datumCas = new Date(
+      parseInt(dateParts[0], 10),
+      parseInt(dateParts[1], 10) - 1, // Month is 0-indexed
+      parseInt(dateParts[2], 10),
+    );
+    if (isNaN(datumCas.getTime())) {
+      throw new Error('Neispravan format datuma');
+    }
+    datumCas.setHours(0, 0, 0, 0);
+
+    const dayOfWeek = datumCas.getDay();
+    const dan = dayOfWeek === 6 ? 'subota' : dayOfWeek === 0 ? 'nedjelja' : null;
+    if (!dan) {
+      throw new Error('Datum mora biti subota ili nedjelja');
+    }
+
+    // Pronađi slot (raspored) za tu grupu i dan
+    const raspored = await this.prisma.raspored.findFirst({
+      where: {
+        grupaId: grupa.id,
+        dan: dan as any,
+      },
+    });
+
+    if (!raspored) {
+      throw new Error(`Nema rasporeda za grupu ${grupa.naziv} u ${dan}`);
+    }
+
+    // Pronađi ili kreiraj čas za taj slot i datum
+    const startOfDay = new Date(datumCas);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(datumCas);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    let cas = await this.prisma.cas.findFirst({
+      where: {
+        rasporedId: raspored.id,
+        datum: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+      },
+    });
+
+    if (!cas) {
+      // Kreiraj novi čas
+      cas = await this.prisma.cas.create({
+        data: {
+          nastavnaGodinaId: nastavnaGodina.id,
+          razredNastavnaGodinaId: grupa.razredNastavnaGodinaId,
+          grupaId: grupa.id,
+          rasporedId: raspored.id,
+          datum: datumCas,
+          tipovi: ['LEKCIJA'],
+          lekcije: {
+            create: {
+              lekcijaId: body.lekcijaId,
+            },
+          },
+        },
+      });
+    } else {
+      // Provjeri da li lekcija već postoji u času
+      const casLekcija = await this.prisma.casLekcija.findFirst({
+        where: {
+          casId: cas.id,
+          lekcijaId: body.lekcijaId,
+        },
+      });
+
+      if (!casLekcija) {
+        // Dodaj lekciju u čas
+        await this.prisma.casLekcija.create({
+          data: {
+            casId: cas.id,
+            lekcijaId: body.lekcijaId,
+          },
+        });
+      }
+    }
+
+    // Provjeri da li već postoji ocjena za ovu kombinaciju
+    const existingOcjena = await this.prisma.casOcjena.findFirst({
+      where: {
+        casId: cas.id,
+        ucenikId: ucenikId,
+        lekcijaId: body.lekcijaId,
+      },
+    });
+
+    if (existingOcjena) {
+      // Update postojeće ocjene
+      await this.prisma.casOcjena.update({
+        where: { id: existingOcjena.id },
+        data: {
+          ocjena: body.ocjena,
+          komentar: body.komentar || null,
+        },
+      });
+    } else {
+      // Kreiraj novu ocjenu
+      await this.prisma.casOcjena.create({
+        data: {
+          casId: cas.id,
+          ucenikId: ucenikId,
+          lekcijaId: body.lekcijaId,
+          ocjena: body.ocjena,
+          komentar: body.komentar || null,
+        },
+      });
+    }
+
+    // Automatski dodaj prisustvo ako ne postoji
+    const existingPrisustvo = await this.prisma.casPrisustvo.findFirst({
+      where: {
+        casId: cas.id,
+        ucenikId: ucenikId,
+      },
+    });
+
+    if (!existingPrisustvo) {
+      await this.prisma.casPrisustvo.create({
+        data: {
+          casId: cas.id,
+          ucenikId: ucenikId,
+          status: 'PRISUTAN',
+        },
+      });
+    }
+
+    return { success: true, casId: cas.id };
+  }
+
+  async addPrisustvoWithDate(
+    ucenikId: string,
+    body: { datum: string; status: 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN'; napomena?: string },
+  ) {
+    const ucenik = await this.prisma.ucenik.findUnique({ where: { id: ucenikId } });
+    if (!ucenik) {
+      throw new Error('Učenik nije pronađen');
+    }
+
+    const nastavnaGodina = await this.getActiveNastavnaGodina();
+    if (!nastavnaGodina) {
+      throw new Error('Nema aktivne nastavne godine');
+    }
+
+    const ucenikGrupa = await this.prisma.ucenikGrupa.findFirst({
+      where: {
+        ucenikId,
+        grupa: { razredNastavnaGodina: { nastavnaGodinaId: nastavnaGodina.id } },
+      },
+      include: { grupa: { include: { razredNastavnaGodina: true } } },
+    });
+
+    if (!ucenikGrupa) {
+      throw new Error('Učenik nije u grupi za aktivnu nastavnu godinu');
+    }
+
+    const grupa = ucenikGrupa.grupa;
+
+    // Parsiraj datum kao lokalni (YYYY-MM-DD) da izbjegnemo timezone pomjeranja
+    const dateParts = body.datum.split('-');
+    if (dateParts.length !== 3) {
+      throw new Error('Neispravan format datuma');
+    }
+    const datumCas = new Date(
+      parseInt(dateParts[0], 10),
+      parseInt(dateParts[1], 10) - 1, // Month is 0-indexed
+      parseInt(dateParts[2], 10),
+    );
+    if (isNaN(datumCas.getTime())) {
+      throw new Error('Neispravan format datuma');
+    }
+    datumCas.setHours(0, 0, 0, 0);
+    const dayOfWeek = datumCas.getDay();
+    const dan = dayOfWeek === 6 ? 'subota' : dayOfWeek === 0 ? 'nedjelja' : null;
+    if (!dan) {
+      throw new Error('Datum mora biti subota ili nedjelja');
+    }
+
+    const raspored = await this.prisma.raspored.findFirst({
+      where: { grupaId: grupa.id, dan: dan as any },
+    });
+
+    if (!raspored) {
+      throw new Error(`Nema rasporeda za grupu ${grupa.naziv} u ${dan}`);
+    }
+
+    const startOfDay = new Date(datumCas);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(datumCas);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    let cas = await this.prisma.cas.findFirst({
+      where: {
+        rasporedId: raspored.id,
+        datum: { gte: startOfDay, lte: endOfDay },
+      },
+    });
+
+    if (!cas) {
+      cas = await this.prisma.cas.create({
+        data: {
+          nastavnaGodinaId: nastavnaGodina.id,
+          razredNastavnaGodinaId: grupa.razredNastavnaGodinaId,
+          grupaId: grupa.id,
+          rasporedId: raspored.id,
+          datum: datumCas,
+          tipovi: ['LEKCIJA'],
+        },
+      });
+    }
+
+    const existingPrisustvo = await this.prisma.casPrisustvo.findFirst({
+      where: { casId: cas.id, ucenikId },
+    });
+
+    if (existingPrisustvo) {
+      await this.prisma.casPrisustvo.update({
+        where: { id: existingPrisustvo.id },
+        data: {
+          status: body.status,
+          napomena: body.napomena || null,
+        },
+      });
+    } else {
+      await this.prisma.casPrisustvo.create({
+        data: {
+          casId: cas.id,
+          ucenikId,
+          status: body.status,
+          napomena: body.napomena || null,
+        },
+      });
+    }
+
+    return { success: true, casId: cas.id };
+  }
+
+  /**
+   * Vraća koje dane (subota/nedjelja) učenikova grupa ima časove
+   * za aktivnu nastavnu godinu. Koristi se na frontendu da se
+   * WeekendDatePicker ograniči samo na relevantne dane.
+   */
+  async getAllowedDaysForUcenik(ucenikId: string): Promise<{ allowedDays: Array<'subota' | 'nedjelja'> }> {
+    const nastavnaGodina = await this.getActiveNastavnaGodina();
+    if (!nastavnaGodina) {
+      return { allowedDays: [] };
+    }
+
+    const ucenikGrupa = await this.prisma.ucenikGrupa.findFirst({
+      where: {
+        ucenikId,
+        grupa: { razredNastavnaGodina: { nastavnaGodinaId: nastavnaGodina.id } },
+      },
+      include: {
+        grupa: {
+          include: {
+            raspored: true,
+          },
+        },
+      },
+    });
+
+    if (!ucenikGrupa || !ucenikGrupa.grupa) {
+      return { allowedDays: [] };
+    }
+
+    const daysSet = new Set<'subota' | 'nedjelja'>();
+    const raspored = ucenikGrupa.grupa.raspored;
+    if (raspored && (raspored.dan === 'subota' || raspored.dan === 'nedjelja')) {
+      daysSet.add(raspored.dan as 'subota' | 'nedjelja');
+    }
+
+    return { allowedDays: Array.from(daysSet) };
+  }
+
+  async deleteOcjena(ocjenaId: string) {
+    await this.prisma.casOcjena.delete({ where: { id: ocjenaId } });
+    return { success: true };
+  }
+
+  async deletePrisustvo(prisustvoId: string) {
+    await this.prisma.casPrisustvo.delete({ where: { id: prisustvoId } });
+    return { success: true };
   }
 }

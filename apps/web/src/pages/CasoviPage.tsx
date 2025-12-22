@@ -1532,56 +1532,8 @@ export default function CasoviPage() {
               </div>
             </div>
 
-            {/* Filter i View Selector */}
+            {/* View Selector i Filter */}
             <div className="flex items-center gap-3">
-              {/* View Selector - Month/Week/Day */}
-              <div className="flex items-center gap-0 border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
-                <button
-                  onClick={() => setView('month')}
-                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
-                    view === 'month'
-                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
-                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                  title="Mjesečni prikaz"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  <span>Mjesec</span>
-                </button>
-                <div className="h-6 w-px bg-gray-200"></div>
-                <button
-                  onClick={() => setView('week')}
-                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
-                    view === 'week'
-                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
-                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                  title="Sedmični prikaz"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  <span>Sedmica</span>
-                </button>
-                <div className="h-6 w-px bg-gray-200"></div>
-                <button
-                  onClick={() => setView('day')}
-                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
-                    view === 'day'
-                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
-                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                  title="Dnevni prikaz"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  <span>Dan</span>
-                </button>
-              </div>
-
               {/* Filter */}
               {nastavnaGodina && (
                 <div className="w-64">
@@ -1618,6 +1570,53 @@ export default function CasoviPage() {
                 </div>
               )}
 
+              {/* View Selector - Month/Week/Day */}
+              <div className="flex items-center gap-0 border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
+                <button
+                  onClick={() => setView('month')}
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
+                    view === 'month'
+                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                  title="Mjesečni prikaz"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  </svg>
+                  <span>Mjesec</span>
+                </button>
+                <div className="h-6 w-px bg-gray-200"></div>
+                <button
+                  onClick={() => setView('week')}
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
+                    view === 'week'
+                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                  title="Sedmični prikaz"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                  </svg>
+                  <span>Sedmica</span>
+                </button>
+                <div className="h-6 w-px bg-gray-200"></div>
+                <button
+                  onClick={() => setView('day')}
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
+                    view === 'day'
+                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                  title="Dnevni prikaz"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>Dan</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

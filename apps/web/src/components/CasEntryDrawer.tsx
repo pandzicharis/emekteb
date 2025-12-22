@@ -1195,16 +1195,16 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                           const getActiveGradeClasses = (grade: number) => {
                             switch (grade) {
                               case 5:
-                                return 'bg-emerald-600 border-emerald-600 text-white shadow-sm';
+                                return 'bg-emerald-100 border-emerald-300 text-emerald-700';
                               case 4:
-                                return 'bg-emerald-300 border-emerald-400 text-emerald-900 shadow-sm';
+                                return 'bg-emerald-50 border-emerald-200 text-emerald-700';
                               case 3:
-                                return 'bg-amber-300 border-amber-400 text-amber-900 shadow-sm';
+                                return 'bg-amber-50 border-amber-200 text-amber-700';
                               case 2:
-                                return 'bg-orange-300 border-orange-400 text-orange-900 shadow-sm';
+                                return 'bg-orange-50 border-orange-200 text-orange-700';
                               case 1:
                               default:
-                                return 'bg-rose-300 border-rose-400 text-rose-900 shadow-sm';
+                                return 'bg-rose-50 border-rose-200 text-rose-700';
                             }
                           };
 
@@ -1587,16 +1587,16 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                                           const barColor = (g: number) => {
                                             switch (g) {
                                               case 5:
-                                                return 'bg-emerald-500';
+                                                return 'bg-emerald-200';
                                               case 4:
-                                                return 'bg-emerald-300';
+                                                return 'bg-emerald-100';
                                               case 3:
-                                                return 'bg-amber-300';
+                                                return 'bg-amber-100';
                                               case 2:
-                                                return 'bg-orange-300';
+                                                return 'bg-orange-100';
                                               case 1:
                                               default:
-                                                return 'bg-rose-300';
+                                                return 'bg-rose-100';
                                             }
                                           };
 

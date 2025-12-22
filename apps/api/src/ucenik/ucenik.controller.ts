@@ -52,4 +52,49 @@ export class UcenikController {
   addPrisustvo(@Param('id') id: string, @Body() body: { casId: string; status: string }) {
     return this.ucenikService.addPrisustvo(id, body);
   }
+
+  @Get(':id/ocjene')
+  @UseGuards(JwtAuthGuard)
+  getOcjeneWithLekcije(@Param('id') id: string) {
+    return this.ucenikService.getOcjeneWithLekcije(id);
+  }
+
+  @Get(':id/prisustvo')
+  @UseGuards(JwtAuthGuard)
+  getPrisustvoStats(@Param('id') id: string) {
+    return this.ucenikService.getPrisustvoStats(id);
+  }
+
+  @Post(':id/ocjena-with-date')
+  @UseGuards(JwtAuthGuard)
+  addOcjenaWithDate(@Param('id') id: string, @Body() body: { datum: string; lekcijaId: string; ocjena: number; komentar?: string }) {
+    return this.ucenikService.addOcjenaWithDate(id, body);
+  }
+
+  @Post(':id/prisustvo-with-date')
+  @UseGuards(JwtAuthGuard)
+  addPrisustvoWithDate(
+    @Param('id') id: string,
+    @Body() body: { datum: string; status: 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN'; napomena?: string },
+  ) {
+    return this.ucenikService.addPrisustvoWithDate(id, body);
+  }
+
+  @Get(':id/allowed-days')
+  @UseGuards(JwtAuthGuard)
+  getAllowedDays(@Param('id') id: string) {
+    return this.ucenikService.getAllowedDaysForUcenik(id);
+  }
+
+  @Post(':id/ocjene/:ocjenaId/delete')
+  @UseGuards(JwtAuthGuard)
+  deleteOcjena(@Param('ocjenaId') ocjenaId: string) {
+    return this.ucenikService.deleteOcjena(ocjenaId);
+  }
+
+  @Post(':id/prisustvo/:prisustvoId/delete')
+  @UseGuards(JwtAuthGuard)
+  deletePrisustvo(@Param('prisustvoId') prisustvoId: string) {
+    return this.ucenikService.deletePrisustvo(prisustvoId);
+  }
 }

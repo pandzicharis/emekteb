@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import axios from 'axios';
+import WeekendDatePicker from './WeekendDatePicker';
 
 const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
 
@@ -16,6 +17,9 @@ interface Ucenik {
   adresaStanovanja: string | null;
   status: string | null;
   eksterniId: number | null;
+  razredNaziv?: string | null;
+  grupaNaziv?: string | null;
+  terminOpis?: string | null;
   obrazovanje: {
     id: string;
     nivoObrazovanja: string | null;
@@ -74,7 +78,7 @@ interface Props {
   onSave?: () => Promise<void> | void;
 }
 
-type TabType = 'podaci' | 'statistika' | 'ocjene';
+type TabType = 'podaci' | 'ocjene' | 'prisustvo';
 
 export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }: Props) {
   const [ucenik, setUcenik] = useState<Ucenik | null>(null);
@@ -85,11 +89,58 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
   const [hasChanges, setHasChanges] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('podaci');
   
-  // For adding ocjena
-  const [lekcije, setLekcije] = useState<Array<{ id: string; naslov: string }>>([]);
-  const [casovi, setCasovi] = useState<Array<{ id: string; datum: string; raspored: { slot?: string } | null }>>([]);
-  const [loadingLekcije, setLoadingLekcije] = useState(false);
-  const [newOcjena, setNewOcjena] = useState({ casId: '', lekcijaId: '', ocjena: 5, komentar: '' });
+  // For new ocjena/prisustvo form with date
+  const [nastavnaGodina, setNastavnaGodina] = useState<{ id: string; naziv: string; datumOd: string; datumDo: string } | null>(null);
+  const [allowedWeekendDays, setAllowedWeekendDays] = useState<Array<'subota' | 'nedjelja'>>([]);
+  const [lekcijeForRazred, setLekcijeForRazred] = useState<Array<{ id: string; naslov: string; tip?: string | null }>>([]);
+  const [selectedDateForOcjena, setSelectedDateForOcjena] = useState<Date | null>(null);
+  const [selectedLekcijaForOcjena, setSelectedLekcijaForOcjena] = useState<string>('');
+  const [ocjenaValue, setOcjenaValue] = useState<number>(5);
+  const [komentarForOcjena, setKomentarForOcjena] = useState<string>('');
+  const [lekcijaSearch, setLekcijaSearch] = useState<string>('');
+  const [selectedOcjeneFilter, setSelectedOcjeneFilter] = useState<Set<number>>(new Set([5, 4, 3, 2, 1]));
+  
+  // Delete confirmation modal
+  const [deleteModal, setDeleteModal] = useState<{ type: 'ocjena' | 'prisustvo'; id: string } | null>(null);
+  // For prisustvo quick add
+  const [selectedDateForPrisustvo, setSelectedDateForPrisustvo] = useState<Date | null>(null);
+  const [prisustvoStatus, setPrisustvoStatus] = useState<'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN'>('PRISUTAN');
+  const [prisustvoNapomena, setPrisustvoNapomena] = useState<string>('');
+
+  // For displaying ocjene with lekcije
+  const [ocjeneWithLekcije, setOcjeneWithLekcije] = useState<Array<{
+    id: string;
+    ocjena: number;
+    komentar: string | null;
+    datum: string;
+    vrijeme: string;
+    lekcija: {
+      id: string;
+      naslov: string;
+    };
+  }>>([]);
+  const [loadingOcjene, setLoadingOcjene] = useState(false);
+
+  // For displaying prisustvo stats
+  const [prisustvoStats, setPrisustvoStats] = useState<{
+    total: number;
+    prisutan: number;
+    opravdan: number;
+    neopravdan: number;
+    prisustvoDistribution: {
+      prisutan: number;
+      opravdan: number;
+      neopravdan: number;
+    };
+    prisustva: Array<{
+      id: string;
+      status: string;
+      napomena: string | null;
+      datum: string;
+      kreiran: string;
+    }>;
+  } | null>(null);
+  const [loadingPrisustvo, setLoadingPrisustvo] = useState(false);
 
   // Fetch ucenik details
   useEffect(() => {
@@ -121,64 +172,109 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
     fetchUcenik();
   }, [open, ucenikId]);
 
-  // Fetch lekcije when cas is selected
-  useEffect(() => {
-    if (!newOcjena.casId) {
-      setLekcije([]);
-      return;
-    }
-
-    const fetchLekcije = async () => {
-      setLoadingLekcije(true);
-      try {
-        const token = localStorage.getItem('token');
-        // Fetch lekcije for the selected cas
-        const response = await axios.get(`${API_URL}/casovi/${newOcjena.casId}/lekcije`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setLekcije(response.data || []);
-      } catch (err) {
-        console.error('Error fetching lekcije:', err);
-        // Fallback to all lekcije if endpoint doesn't exist
-        try {
-          const token = localStorage.getItem('token');
-          const response = await axios.get(`${API_URL}/lekcije`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          setLekcije(response.data || []);
-        } catch (fallbackErr) {
-          console.error('Error fetching all lekcije:', fallbackErr);
-          setLekcije([]);
-        }
-      } finally {
-        setLoadingLekcije(false);
-      }
-    };
-
-    fetchLekcije();
-  }, [newOcjena.casId]);
-
-  // Fetch casovi when on ocjene tab
+  // Fetch ocjene with lekcije when on ocjene tab
   useEffect(() => {
     if (activeTab !== 'ocjene' || !ucenikId) {
-      setCasovi([]);
+      setOcjeneWithLekcije([]);
       return;
     }
 
-    const fetchCasovi = async () => {
+    const fetchOcjeneWithLekcije = async () => {
+      setLoadingOcjene(true);
       try {
         const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_URL}/casovi`, {
+        const response = await axios.get(`${API_URL}/ucenici/${ucenikId}/ocjene`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        setCasovi(response.data || []);
+        setOcjeneWithLekcije(response.data || []);
       } catch (err) {
-        console.error('Error fetching casovi:', err);
-        setCasovi([]);
+        console.error('Error fetching ocjene with lekcije:', err);
+        setOcjeneWithLekcije([]);
+      } finally {
+        setLoadingOcjene(false);
       }
     };
 
-    fetchCasovi();
+    fetchOcjeneWithLekcije();
+  }, [activeTab, ucenikId]);
+
+  // Fetch nastavna godina and lekcije when on ocjene tab
+  useEffect(() => {
+    if ((activeTab !== 'ocjene' && activeTab !== 'prisustvo') || !ucenikId || !ucenik) {
+      return;
+    }
+
+    const fetchData = async () => {
+        try {
+          const token = localStorage.getItem('token');
+
+        // Fetch nastavna godina from dashboard
+        const dashboardRes = await axios.get(`${API_URL}/muallimi/dashboard`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+        if (dashboardRes.data?.nastavnaGodina) {
+          const ng = dashboardRes.data.nastavnaGodina;
+          setNastavnaGodina({
+            id: ng.id,
+            naziv: ng.naziv,
+            datumOd: ng.datumOd,
+            datumDo: ng.datumDo,
+          });
+
+          // Fetch lekcije for razred only if on ocjene tab
+          if (activeTab === 'ocjene') {
+            // Fetch lekcije for razred - need to find razred from ucenik
+            // For now, we'll fetch all lekcije and filter later if needed
+            const lekcijeRes = await axios.get(`${API_URL}/lekcije`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            setLekcijeForRazred(lekcijeRes.data || []);
+          }
+        }
+
+        // Fetch allowed weekend days for this ucenik (subota/nedjelja) for their grupa
+        if (ucenikId) {
+          const allowedDaysRes = await axios.get<{ allowedDays: Array<'subota' | 'nedjelja'> }>(
+            `${API_URL}/ucenici/${ucenikId}/allowed-days`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
+          setAllowedWeekendDays(allowedDaysRes.data?.allowedDays || []);
+        }
+      } catch (err) {
+        console.error('Error fetching nastavna godina, lekcije and allowed days:', err);
+      }
+    };
+
+    fetchData();
+  }, [activeTab, ucenikId, ucenik]);
+
+  // Fetch prisustvo stats when on prisustvo tab
+  useEffect(() => {
+    if (activeTab !== 'prisustvo' || !ucenikId) {
+      setPrisustvoStats(null);
+      return;
+    }
+
+    const fetchPrisustvoStats = async () => {
+      setLoadingPrisustvo(true);
+      try {
+        const token = localStorage.getItem('token');
+        const response = await axios.get(`${API_URL}/ucenici/${ucenikId}/prisustvo`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setPrisustvoStats(response.data);
+      } catch (err) {
+        console.error('Error fetching prisustvo stats:', err);
+        setPrisustvoStats(null);
+      } finally {
+        setLoadingPrisustvo(false);
+      }
+    };
+
+    fetchPrisustvoStats();
   }, [activeTab, ucenikId]);
 
 
@@ -323,47 +419,6 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
     setEditedUcenik(updated as Ucenik);
     setHasChanges(true);
   };
-
-  const handleAddOcjena = async () => {
-    if (!ucenikId || !newOcjena.casId || !newOcjena.lekcijaId) return;
-    
-    setSaving(true);
-    setError(null);
-    try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_URL}/casovi/${newOcjena.casId}/ocjene`,
-        {
-          ucenikId,
-          lekcijaId: newOcjena.lekcijaId,
-          ocjena: newOcjena.ocjena,
-          komentar: newOcjena.komentar || null,
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      // Refresh data
-      const response = await axios.get<Ucenik>(`${API_URL}/ucenici/${ucenikId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setUcenik(response.data);
-      setEditedUcenik(response.data);
-      
-      // Reset form
-      setNewOcjena({ casId: '', lekcijaId: '', ocjena: 5, komentar: '' });
-      
-      if (onSave) {
-        await onSave();
-      }
-    } catch (err) {
-      console.error('Error adding ocjena:', err);
-      const axiosError = err as { response?: { data?: { message?: string } } };
-      setError(axiosError.response?.data?.message || 'Greška pri dodavanju ocjene');
-    } finally {
-      setSaving(false);
-    }
-  };
-
 
   const currentUcenik = editedUcenik || ucenik;
 
@@ -859,7 +914,129 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
     );
   };
 
-  const renderStatistikaTab = () => {
+  const getActiveGradeClasses = (grade: number) => {
+    switch (grade) {
+      case 5:
+        return 'bg-emerald-100 border-emerald-300 text-emerald-700';
+      case 4:
+        return 'bg-emerald-50 border-emerald-200 text-emerald-700';
+      case 3:
+        return 'bg-amber-50 border-amber-200 text-amber-700';
+      case 2:
+        return 'bg-orange-50 border-orange-200 text-orange-700';
+      case 1:
+      default:
+        return 'bg-rose-50 border-rose-200 text-rose-700';
+    }
+  };
+
+  const getPrisustvoColor = (status: 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN') => {
+    if (status === 'PRISUTAN') return 'bg-emerald-50 border-emerald-200 text-emerald-700';
+    if (status === 'OPRAVDAN') return 'bg-amber-50 border-amber-200 text-amber-700';
+    return 'bg-rose-50 border-rose-200 text-rose-700';
+  };
+
+  const getPrisustvoText = (status: 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN') => {
+    if (status === 'PRISUTAN') return 'Prisutan';
+    if (status === 'OPRAVDAN') return 'Opravdan';
+    return 'Neopravdan';
+  };
+
+  const filteredLekcijeForOcjena = useMemo(() => {
+    const term = lekcijaSearch.trim().toLowerCase();
+    if (!term) return lekcijeForRazred;
+    return lekcijeForRazred.filter((l) => {
+      const titleMatch = l.naslov.toLowerCase().includes(term);
+      const tipLabel =
+        l.tip === 'KURAN' ? 'kuran' : l.tip === 'SUFARA' ? 'sufara' : 'ilmihal';
+      const tipMatch = tipLabel.toLowerCase().includes(term);
+      return titleMatch || tipMatch;
+    });
+  }, [lekcijeForRazred, lekcijaSearch]);
+
+  const filteredOcjeneWithLekcije = useMemo(() => {
+    return ocjeneWithLekcije.filter((ocjena) => selectedOcjeneFilter.has(ocjena.ocjena));
+  }, [ocjeneWithLekcije, selectedOcjeneFilter]);
+
+  const toggleOcjenaFilter = (ocjena: number) => {
+    setSelectedOcjeneFilter((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(ocjena)) {
+        newSet.delete(ocjena);
+      } else {
+        newSet.add(ocjena);
+      }
+      return newSet;
+    });
+  };
+
+  const handleDeleteOcjena = async (ocjenaId: string) => {
+    if (!ucenikId) return;
+    setDeleteModal(null); // Close modal immediately
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API_URL}/ucenici/${ucenikId}/ocjene/${ocjenaId}/delete`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      const refreshed = await axios.get(`${API_URL}/ucenici/${ucenikId}/ocjene`, { headers: { Authorization: `Bearer ${token}` } });
+      setOcjeneWithLekcije(refreshed.data || []);
+    } catch (err: unknown) {
+      console.error('Error deleting ocjena', err);
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      alert(axiosErr.response?.data?.message || 'Greška pri brisanju ocjene');
+    }
+  };
+
+  const handleDeletePrisustvo = async (prisustvoId: string) => {
+    if (!ucenikId) return;
+    setDeleteModal(null); // Close modal immediately
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API_URL}/ucenici/${ucenikId}/prisustvo/${prisustvoId}/delete`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      const refreshed = await axios.get(`${API_URL}/ucenici/${ucenikId}/prisustvo`, { headers: { Authorization: `Bearer ${token}` } });
+      setPrisustvoStats(refreshed.data);
+    } catch (err: unknown) {
+      console.error('Error deleting prisustvo', err);
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      alert(axiosErr.response?.data?.message || 'Greška pri brisanju prisustva');
+    }
+  };
+
+  // Helper function to format date as YYYY-MM-DD without timezone conversion
+  const formatDateOnly = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const handleAddPrisustvo = async () => {
+    if (!ucenikId || !selectedDateForPrisustvo) {
+      alert('Odaberite datum i status');
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API_URL}/ucenici/${ucenikId}/prisustvo-with-date`,
+        {
+          datum: formatDateOnly(selectedDateForPrisustvo),
+          status: prisustvoStatus,
+          napomena: prisustvoNapomena || undefined,
+        },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const refreshed = await axios.get(`${API_URL}/ucenici/${ucenikId}/prisustvo`, { headers: { Authorization: `Bearer ${token}` } });
+      setPrisustvoStats(refreshed.data);
+      setSelectedDateForPrisustvo(null);
+      setPrisustvoNapomena('');
+      setPrisustvoStatus('PRISUTAN');
+    } catch (err: unknown) {
+      console.error('Error adding prisustvo', err);
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      alert(axiosErr.response?.data?.message || 'Greška pri dodavanju prisustva');
+    }
+  };
+
+  const renderOcjeneStatsTab = () => {
     if (!currentUcenik) return null;
 
     if (totalOcjena === 0) {
@@ -1144,14 +1321,8 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
             </div>
           </div>
         </div>
-      </div>
-    );
-  };
 
-  const renderOcjeneTab = () => {
-    return (
-      <div className="space-y-6">
-        {/* Form za dodavanje ocjene */}
+        {/* Forma za dodavanje ocjene */}
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
           <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
             <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
@@ -1161,83 +1332,674 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
               Dodaj ocjenu
             </h3>
           </div>
-          <div className="p-6">
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Čas</label>
-                <select
-                  value={newOcjena.casId}
-                  onChange={(e) => {
-                    setNewOcjena({ ...newOcjena, casId: e.target.value, lekcijaId: '' });
-                  }}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">Odaberi čas</option>
-                  {casovi.filter(c => c.id).map((cas) => (
-                    <option key={cas.id} value={cas.id}>
-                      {new Date(cas.datum).toLocaleDateString('bs-BA')} - {cas.raspored?.slot}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Lekcija</label>
-                <select
-                  value={newOcjena.lekcijaId}
-                  onChange={(e) => setNewOcjena({ ...newOcjena, lekcijaId: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  disabled={loadingLekcije || !newOcjena.casId}
-                >
-                  <option value="">{loadingLekcije ? 'Učitavanje...' : 'Odaberi lekciju'}</option>
-                  {lekcije.map((lekcija) => (
-                    <option key={lekcija.id} value={lekcija.id}>
-                      {lekcija.naslov}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Ocjena</label>
-                <select
-                  value={newOcjena.ocjena}
-                  onChange={(e) => setNewOcjena({ ...newOcjena, ocjena: parseInt(e.target.value) })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value={5}>5 - Odličan</option>
-                  <option value={4}>4 - Vrlo dobar</option>
-                  <option value={3}>3 - Dobar</option>
-                  <option value={2}>2 - Dovoljan</option>
-                  <option value={1}>1 - Nedovoljan</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Komentar (opcionalno)</label>
-                <textarea
-                  value={newOcjena.komentar}
-                  onChange={(e) => setNewOcjena({ ...newOcjena, komentar: e.target.value })}
-                  rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-                  placeholder="Dodatni komentar..."
+          <div className="p-6 space-y-4">
+            {/* Datum picker */}
+            {nastavnaGodina && (
+              <div className="w-full">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Datum
+                </label>
+                <WeekendDatePicker
+                  selectedDate={selectedDateForOcjena}
+                  onDateSelect={(date) => setSelectedDateForOcjena(date)}
+                  startDate={new Date(nastavnaGodina.datumOd)}
+                  endDate={new Date(nastavnaGodina.datumDo)}
+                  allowedDays={allowedWeekendDays}
+                  singleColumn={true}
                 />
               </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={handleAddOcjena}
-                  disabled={saving || !newOcjena.casId || !newOcjena.lekcijaId}
-                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-                >
-                  {saving ? 'Spremanje...' : 'Dodaj ocjenu'}
-                </button>
-                <button
-                  onClick={() => {
-                    setNewOcjena({ casId: '', lekcijaId: '', ocjena: 5, komentar: '' });
-                  }}
-                  className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
-                >
-                  Resetuj
-                </button>
+            )}
+
+            {/* Lekcije - sa filterom kao u CasEntryDrawer */}
+              <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Lekcija
+              </label>
+              
+              {/* Search + brojač */}
+              <div className="flex items-center gap-2 mb-3">
+                <div className="relative flex-1">
+                  <svg
+                    className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z"
+                    />
+                  </svg>
+                  <input
+                    value={lekcijaSearch}
+                    onChange={(e) => setLekcijaSearch(e.target.value)}
+                    placeholder="Pretraži po nazivu ili tipu lekcije (npr. kuran, sufara, ilmihal)..."
+                    className="w-full rounded-lg border border-gray-200 bg-gray-50 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+              </div>
+                <div className="text-xs text-gray-500 font-medium px-2 py-1 bg-gray-100 rounded-lg border border-gray-200">
+                  {filteredLekcijeForOcjena.length}/{lekcijeForRazred.length}
+                </div>
+              </div>
+
+              {/* Scrollable lista lekcija */}
+              <div className="border border-gray-200 rounded-lg bg-gray-50 max-h-64 overflow-y-auto">
+                {filteredLekcijeForOcjena.length === 0 ? (
+                  <div className="px-3 py-3 text-sm text-gray-500">
+                    Nema lekcija za prikaz sa zadatim filterom.
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-gray-200">
+                    {filteredLekcijeForOcjena.map((lekcija) => {
+                      const selected = selectedLekcijaForOcjena === lekcija.id;
+                      const tip = (lekcija.tip ?? 'ILMIHAL') as 'ILMIHAL' | 'KURAN' | 'SUFARA';
+
+                      const tipBadgeClasses =
+                        tip === 'KURAN'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : tip === 'SUFARA'
+                            ? 'bg-cyan-50 text-cyan-800 border-cyan-200'
+                            : 'bg-gray-100 text-gray-700 border-gray-200';
+
+                      const tipLabel =
+                        tip === 'KURAN' ? 'Kuran' : tip === 'SUFARA' ? 'Sufara' : 'Ilmihal';
+
+                      return (
+                        <li key={lekcija.id}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedLekcijaForOcjena(lekcija.id)}
+                            className={`w-full flex items-center justify-between px-3 py-2.5 cursor-pointer transition-colors text-left ${
+                              selected
+                                ? 'bg-blue-50/70'
+                                : 'hover:bg-gray-100/70'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center ${
+                                selected
+                                  ? 'bg-blue-600 border-blue-600'
+                                  : 'border-gray-300'
+                              }`}>
+                                {selected && (
+                                  <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                )}
+                              </div>
+                              <span className="text-sm text-gray-900">{lekcija.naslov}</span>
+                            </div>
+                            <span
+                              className={`ml-3 inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${tipBadgeClasses}`}
+                            >
+                              {tipLabel}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
             </div>
+
+            {/* Ocjene - UI kao u CasEntryDrawer */}
+              <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Ocjena
+              </label>
+              <div className="flex items-center gap-1">
+                {[5, 4, 3, 2, 1].map((g) => {
+                  const active = ocjenaValue === g;
+    return (
+                    <button
+                      key={g}
+                      onClick={() => setOcjenaValue(g)}
+                      className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-all ${
+                        active
+                          ? getActiveGradeClasses(g)
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-200 hover:text-blue-700'
+                      }`}
+                    >
+                      {g}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Komentar */}
+              <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Komentar (opcionalno)
+              </label>
+                <textarea
+                value={komentarForOcjena}
+                onChange={(e) => setKomentarForOcjena(e.target.value)}
+                placeholder="Kratak komentar..."
+                  rows={3}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                />
+              </div>
+
+            {/* Submit button */}
+                <button
+              onClick={async () => {
+                if (!selectedDateForOcjena || !selectedLekcijaForOcjena || !ucenikId) {
+                  alert('Molimo popunite sva polja');
+                  return;
+                }
+
+                try {
+                  const token = localStorage.getItem('token');
+                  
+                  await axios.post(
+                    `${API_URL}/ucenici/${ucenikId}/ocjena-with-date`,
+                    {
+                      datum: formatDateOnly(selectedDateForOcjena),
+                      lekcijaId: selectedLekcijaForOcjena,
+                      ocjena: ocjenaValue,
+                      komentar: komentarForOcjena || undefined,
+                    },
+                    {
+                      headers: { Authorization: `Bearer ${token}` },
+                    }
+                  );
+
+                  // Reset form
+                  setSelectedDateForOcjena(null);
+                  setSelectedLekcijaForOcjena('');
+                  setOcjenaValue(5);
+                  setKomentarForOcjena('');
+
+                  // Refresh ocjene list
+                  const response = await axios.get(`${API_URL}/ucenici/${ucenikId}/ocjene`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  setOcjeneWithLekcije(response.data || []);
+
+                  // Refresh prisustvo stats
+                  const prisustvoRes = await axios.get(`${API_URL}/ucenici/${ucenikId}/prisustvo`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  setPrisustvoStats(prisustvoRes.data);
+                } catch (err: unknown) {
+                  console.error('Error adding ocjena:', err);
+                  const axiosErr = err as { response?: { data?: { message?: string } } };
+                  alert(axiosErr.response?.data?.message || 'Greška pri dodavanju ocjene');
+                }
+              }}
+              disabled={!selectedDateForOcjena || !selectedLekcijaForOcjena}
+              className="w-full rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Dodaj ocjenu
+                </button>
+          </div>
+        </div>
+
+        {/* Historija ocjena */}
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+            <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Historija ocjena
+            </h3>
+          </div>
+          <div className="p-6">
+              {loadingOcjene ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+      </div>
+              ) : ocjeneWithLekcije.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-sm text-gray-500">Nema unesenih ocjena za lekcije.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Filteri za ocjene */}
+                  <div className="mb-4 pb-4 border-b border-gray-200">
+                    <div className="flex items-center gap-2">
+                      {[5, 4, 3, 2, 1].map((ocjena) => {
+                        const isSelected = selectedOcjeneFilter.has(ocjena);
+                        const count = ocjeneWithLekcije.filter((o) => o.ocjena === ocjena).length;
+                        return (
+                          <button
+                            key={ocjena}
+                            type="button"
+                            onClick={() => toggleOcjenaFilter(ocjena)}
+                            className={`flex-1 flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg border transition-all ${
+                              isSelected
+                                ? getActiveGradeClasses(ocjena)
+                                : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                            }`}
+                          >
+                            <span className="text-lg font-bold">{ocjena}</span>
+                            <span className={`text-[10px] font-semibold ${
+                              isSelected ? 'text-gray-700' : 'text-gray-500'
+                            }`}>
+                              {count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Lista filtriranih ocjena */}
+                  {filteredOcjeneWithLekcije.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-sm text-gray-500">Nema ocjena za odabrane filtere.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {filteredOcjeneWithLekcije.map((ocjenaItem) => (
+                    <div
+                      key={ocjenaItem.id}
+                      className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors relative"
+                    >
+                      <div className="mb-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-semibold text-gray-900">
+                            {ocjenaItem.lekcija.naslov}
+                          </h4>
+                          <div className="flex-shrink-0">
+                            <div className={`w-10 h-10 rounded-lg border text-sm font-semibold flex items-center justify-center ${getActiveGradeClasses(ocjenaItem.ocjena)}`}>
+                              {ocjenaItem.ocjena}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <span>{new Date(ocjenaItem.datum).toLocaleDateString('bs-BA', { 
+                              day: '2-digit', 
+                              month: '2-digit', 
+                              year: 'numeric' 
+                            })}</span>
+                          </div>
+                          {ocjenaItem.komentar && (
+                            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                              </svg>
+                              <span className="max-w-md">{ocjenaItem.komentar}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteModal({ type: 'ocjena', id: ocjenaItem.id })}
+                        className="absolute bottom-2 right-2 text-red-500 hover:text-red-700 transition-colors"
+                        title="Obriši ocjenu"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                      ))}
+              </div>
+                  )}
+                </>
+              )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderPrisustvoTab = () => {
+    if (!currentUcenik) return null;
+
+    if (!prisustvoStats) {
+      if (loadingPrisustvo) {
+        return (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        );
+      }
+      return (
+        <div className="bg-white rounded-lg border border-gray-200 p-12">
+          <div className="flex flex-col items-center justify-center text-center">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Nema podataka o prisustvu</h3>
+            <p className="text-sm text-gray-500 max-w-sm">
+              Ovaj učenik još nema unesene podatke o prisustvu.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    const { total, prisutan, prisustvoDistribution, prisustva } = prisustvoStats;
+    const prisustvoProcenat = total > 0 ? ((prisutan / total) * 100).toFixed(1) : '0';
+
+    return (
+      <div className="space-y-6">
+        {/* Ukupno prisustvo */}
+        {total > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+            <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+                Ukupno prisustvo
+            </h3>
+          </div>
+          <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+              <div>
+                  <div className="text-sm text-gray-500 mb-1">Procenat prisustva</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-3xl font-bold ${
+                      parseFloat(prisustvoProcenat) >= 90 ? 'text-emerald-600' :
+                      parseFloat(prisustvoProcenat) >= 75 ? 'text-blue-600' :
+                      parseFloat(prisustvoProcenat) >= 50 ? 'text-yellow-600' : 'text-red-600'
+                    }`}>
+                      {prisustvoProcenat}%
+                    </span>
+              </div>
+                </div>
+                <div className="text-right">
+                  <div className={`text-xl font-bold ${
+                    parseFloat(prisustvoProcenat) >= 90 ? 'text-emerald-600' :
+                    parseFloat(prisustvoProcenat) >= 75 ? 'text-blue-600' :
+                    parseFloat(prisustvoProcenat) >= 50 ? 'text-yellow-600' : 'text-red-600'
+                  }`}>
+                    {prisutan}/{total}
+                  </div>
+                  <div className="text-xs text-gray-500">prisutan/ukupno</div>
+                </div>
+              </div>
+              <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    parseFloat(prisustvoProcenat) >= 90 ? 'bg-emerald-500' :
+                    parseFloat(prisustvoProcenat) >= 75 ? 'bg-blue-500' :
+                    parseFloat(prisustvoProcenat) >= 50 ? 'bg-yellow-500' : 
+                    'bg-red-500'
+                  }`}
+                  style={{ width: `${prisustvoProcenat}%` }}
+                ></div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Distribucija prisustva */}
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                Distribucija prisustva
+              </h3>
+              <div className="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                <span className="font-medium">{total}</span> ukupno
+              </div>
+            </div>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-3 gap-4">
+              {/* Prisutan */}
+              <div className="bg-emerald-50 rounded-lg border border-emerald-200 p-4 hover:bg-emerald-100/50 transition-colors">
+                <div className="flex flex-col items-center">
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center mb-2">
+                    <svg className="w-5 h-5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <div className="text-xs font-medium text-emerald-700 mb-1">Prisutan</div>
+                  <div className="text-2xl font-bold text-emerald-700 mb-1">{prisustvoDistribution.prisutan}</div>
+                  {total > 0 && (
+                    <div className="text-xs text-emerald-600 mb-2">
+                      {((prisustvoDistribution.prisutan / total) * 100).toFixed(0)}%
+                    </div>
+                  )}
+                  <div className="w-full h-1.5 bg-emerald-200 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-emerald-500 rounded-full transition-all duration-500" 
+                      style={{ width: `${total > 0 ? (prisustvoDistribution.prisutan / total) * 100 : 0}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Opravdan */}
+              <div className="bg-amber-50 rounded-lg border border-amber-200 p-4 hover:bg-amber-100/50 transition-colors">
+                <div className="flex flex-col items-center">
+                  <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center mb-2">
+                    <svg className="w-5 h-5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="text-xs font-medium text-amber-700 mb-1">Opravdan</div>
+                  <div className="text-2xl font-bold text-amber-700 mb-1">{prisustvoDistribution.opravdan}</div>
+                  {total > 0 && (
+                    <div className="text-xs text-amber-600 mb-2">
+                      {((prisustvoDistribution.opravdan / total) * 100).toFixed(0)}%
+                    </div>
+                  )}
+                  <div className="w-full h-1.5 bg-amber-200 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-amber-500 rounded-full transition-all duration-500" 
+                      style={{ width: `${total > 0 ? (prisustvoDistribution.opravdan / total) * 100 : 0}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Neopravdan */}
+              <div className="bg-rose-50 rounded-lg border border-rose-200 p-4 hover:bg-rose-100/50 transition-colors">
+                <div className="flex flex-col items-center">
+                  <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center mb-2">
+                    <svg className="w-5 h-5 text-rose-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </div>
+                  <div className="text-xs font-medium text-rose-700 mb-1">Neopravdan</div>
+                  <div className="text-2xl font-bold text-rose-700 mb-1">{prisustvoDistribution.neopravdan}</div>
+                  {total > 0 && (
+                    <div className="text-xs text-rose-600 mb-2">
+                      {((prisustvoDistribution.neopravdan / total) * 100).toFixed(0)}%
+                    </div>
+                  )}
+                  <div className="w-full h-1.5 bg-rose-200 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-rose-500 rounded-full transition-all duration-500" 
+                      style={{ width: `${total > 0 ? (prisustvoDistribution.neopravdan / total) * 100 : 0}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Forma za dodavanje prisustva */}
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+            <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              Dodaj prisustvo
+            </h3>
+          </div>
+          <div className="p-6 space-y-4">
+            {/* Datum picker */}
+            {nastavnaGodina && (
+              <div className="w-full">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Datum
+                </label>
+                <WeekendDatePicker
+                  selectedDate={selectedDateForPrisustvo}
+                  onDateSelect={(date) => setSelectedDateForPrisustvo(date)}
+                  startDate={new Date(nastavnaGodina.datumOd)}
+                  endDate={new Date(nastavnaGodina.datumDo)}
+                  allowedDays={allowedWeekendDays}
+                  singleColumn={true}
+                />
+              </div>
+            )}
+
+            {/* Status */}
+              <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+              <div className="flex items-center gap-2">
+                {(['PRISUTAN', 'OPRAVDAN', 'NEOPRAVDAN'] as const).map((status) => {
+                  const active = prisustvoStatus === status;
+                  const label = status === 'PRISUTAN' ? 'Prisutan' : status === 'OPRAVDAN' ? 'Opravdan' : 'Neopravdan';
+                  const cls = getPrisustvoColor(status);
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setPrisustvoStatus(status)}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                        active ? cls : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Napomena */}
+              <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Napomena (opcionalno)
+              </label>
+                <textarea
+                value={prisustvoNapomena}
+                onChange={(e) => setPrisustvoNapomena(e.target.value)}
+                placeholder="Dodatna napomena..."
+                  rows={3}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                />
+              </div>
+
+            {/* Submit button */}
+                <button
+              onClick={handleAddPrisustvo}
+              disabled={!selectedDateForPrisustvo}
+              className="w-full rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Dodaj prisustvo
+                </button>
+          </div>
+        </div>
+
+        {/* Lista prisustva */}
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+            <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              Historija prisustva
+            </h3>
+          </div>
+          <div className="p-6">
+            {prisustva.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-sm text-gray-500">Nema unesenih podataka o prisustvu.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {prisustva.map((prisustvoItem) => (
+                  <div
+                    key={prisustvoItem.id}
+                    className={`p-4 rounded-lg border hover:bg-gray-50 transition-colors relative ${
+                      prisustvoItem.status === 'PRISUTAN' 
+                        ? 'bg-emerald-50 border-emerald-200' 
+                        : prisustvoItem.status === 'OPRAVDAN'
+                        ? 'bg-amber-50 border-amber-200'
+                        : 'bg-rose-50 border-rose-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className={`w-7 h-7 rounded-full flex items-center justify-center ${
+                            prisustvoItem.status === 'PRISUTAN' 
+                              ? 'bg-emerald-100 text-emerald-700' 
+                              : prisustvoItem.status === 'OPRAVDAN'
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-rose-100 text-rose-700'
+                          }`}>
+                            {prisustvoItem.status === 'PRISUTAN' ? (
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            ) : prisustvoItem.status === 'OPRAVDAN' ? (
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            ) : (
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                            <svg className="w-4 h-4 flex-shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <span>{new Date(prisustvoItem.datum).toLocaleDateString('bs-BA', { 
+                              day: '2-digit', 
+                              month: '2-digit', 
+                              year: 'numeric' 
+                            })}</span>
+                          </div>
+                        </div>
+                        {prisustvoItem.napomena && (
+                          <div className="flex items-start gap-1.5 text-xs text-gray-600 mt-2 pl-9">
+                            <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                            </svg>
+                            <span className="flex-1">{prisustvoItem.napomena}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-shrink-0 ml-4">
+                        <div className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${getPrisustvoColor(prisustvoItem.status as 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN')}`}>
+                          {getPrisustvoText(prisustvoItem.status as 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN')}
+                        </div>
+                      </div>
+                    </div>
+                <button
+                      type="button"
+                      onClick={() => setDeleteModal({ type: 'prisustvo', id: prisustvoItem.id })}
+                      className="absolute bottom-2 right-2 text-red-500 hover:text-red-700 transition-colors"
+                      title="Obriši prisustvo"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                </button>
+              </div>
+                ))}
+            </div>
+            )}
           </div>
         </div>
       </div>
@@ -1273,8 +2035,8 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
     return (
       <div className="space-y-6">
         {activeTab === 'podaci' && renderPodaciTab()}
-        {activeTab === 'statistika' && renderStatistikaTab()}
-        {activeTab === 'ocjene' && renderOcjeneTab()}
+        {activeTab === 'ocjene' && renderOcjeneStatsTab()}
+        {activeTab === 'prisustvo' && renderPrisustvoTab()}
       </div>
     );
   };
@@ -1283,6 +2045,42 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
 
   return (
     <>
+      {/* Delete Confirmation Modal */}
+      {deleteModal && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Potvrdi brisanje
+              </h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Da li ste sigurni da želite obrisati {deleteModal.type === 'ocjena' ? 'ovu ocjenu' : 'ovo prisustvo'}? Ova akcija se ne može poništiti.
+              </p>
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  onClick={() => setDeleteModal(null)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+                >
+                  Odustani
+                </button>
+                <button
+                  onClick={() => {
+                    if (deleteModal.type === 'ocjena') {
+                      handleDeleteOcjena(deleteModal.id);
+                    } else {
+                      handleDeletePrisustvo(deleteModal.id);
+                    }
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+                >
+                  Obriši
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/50 z-50 transition-opacity"
@@ -1319,6 +2117,33 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
               {currentUcenik?.email && (
                 <p className="text-sm text-gray-500">{currentUcenik.email}</p>
               )}
+              {(currentUcenik?.razredNaziv || currentUcenik?.grupaNaziv || currentUcenik?.terminOpis) && (
+                <p className="mt-1 text-xs text-gray-600 flex items-center gap-2">
+                  <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M3 7h4l2-3h6l2 3h4M5 21h14a2 2 0 002-2v-8H3v8a2 2 0 002 2z"
+                    />
+                  </svg>
+                  <span>
+                    {currentUcenik?.razredNaziv && <span>{currentUcenik.razredNaziv}</span>}
+                    {currentUcenik?.grupaNaziv && (
+                      <span>
+                        {currentUcenik?.razredNaziv ? ' · ' : ''}
+                        Grupa {currentUcenik.grupaNaziv}
+                      </span>
+                    )}
+                    {currentUcenik?.terminOpis && (
+                      <span>
+                        {(currentUcenik?.razredNaziv || currentUcenik?.grupaNaziv) ? ' · ' : ''}
+                        {currentUcenik.terminOpis}
+                      </span>
+                    )}
+                  </span>
+                </p>
+              )}
             </div>
           </div>
           <button
@@ -1350,21 +2175,6 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
               </div>
             </button>
             <button
-              onClick={() => setActiveTab('statistika')}
-              className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === 'statistika'
-                  ? 'border-blue-600 text-blue-600 bg-white'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                Statistika
-              </div>
-            </button>
-            <button
               onClick={() => setActiveTab('ocjene')}
               className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === 'ocjene'
@@ -1377,6 +2187,21 @@ export default function UcenikDetailsDrawer({ open, ucenikId, onClose, onSave }:
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                 </svg>
                 Ocjene
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('prisustvo')}
+              className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+                activeTab === 'prisustvo'
+                  ? 'border-blue-600 text-blue-600 bg-white'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Prisustvo
               </div>
             </button>
           </div>

@@ -65,6 +65,8 @@ export default function UceniciPage() {
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
   const [quickProsjekFilter, setQuickProsjekFilter] = useState<string | null>(null); // 'excellent', 'good', 'average', 'poor'
+  // Prikaži samo aktivne učenike po defaultu
+  const [showOnlyActive, setShowOnlyActive] = useState<boolean>(true);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState({
     prosjekMin: null as number | null,
@@ -318,7 +320,7 @@ export default function UceniciPage() {
           });
           const responseData = response.data;
       if (responseData && typeof responseData === 'object' && !Array.isArray(responseData) && 'data' in responseData) {
-            let pageUcenici = responseData.data || [];
+            const pageUcenici = responseData.data || [];
             allUcenici = [...allUcenici, ...pageUcenici];
             if (page === 1) {
         totalCount = responseData.total || 0;
@@ -339,14 +341,14 @@ export default function UceniciPage() {
         });
         const responseData = response.data;
         if (responseData && typeof responseData === 'object' && !Array.isArray(responseData) && 'data' in responseData) {
-          let pageUcenici = responseData.data || [];
+          const pageUcenici = responseData.data || [];
           allUcenici = pageUcenici;
           totalCount = responseData.total || 0;
           totalPagesCount = responseData.totalPages || 1;
         }
       }
       
-      // Apply filters only if filters are active
+      // Apply filters
       let filteredUcenici = allUcenici;
       
       if (hasActiveFilters) {
@@ -365,11 +367,18 @@ export default function UceniciPage() {
           filteredUcenici = filteredUcenici.filter(u => {
             if (u.prosjek === null) return false;
             switch (quickProsjekFilter) {
-              case 'excellent': return u.prosjek >= 4.5;
-              case 'good': return u.prosjek >= 3.5 && u.prosjek < 4.5;
-              case 'average': return u.prosjek >= 2.5 && u.prosjek < 3.5;
-              case 'poor': return u.prosjek < 2.5;
-              default: return true;
+              case 'excellent': 
+                return u.prosjek >= 4.5;
+              case 'very_good':
+                return u.prosjek >= 4.0 && u.prosjek < 4.5;
+              case 'good': 
+                return u.prosjek >= 3.5 && u.prosjek < 4.0;
+              case 'average': 
+                return u.prosjek >= 2.5 && u.prosjek < 3.5;
+              case 'poor': 
+                return u.prosjek < 2.5;
+              default: 
+                return true;
             }
           });
         }
@@ -426,6 +435,11 @@ export default function UceniciPage() {
             return new Date(u.datumRodjenja) <= new Date(advancedFilters.datumRodjenjaDo);
           });
         }
+      }
+
+      // Global filter: samo aktivni učenici (osim ako je isključeno)
+      if (showOnlyActive) {
+        filteredUcenici = filteredUcenici.filter(u => u.status === 'AKTIVAN');
       }
       
       const sortedUcenici = sortUcenici(filteredUcenici, sortField, sortDirection);
@@ -608,6 +622,32 @@ export default function UceniciPage() {
     poor: ucenici.filter(u => u.prosjek !== null && u.prosjek < 2.5).length,
     active: ucenici.filter(u => u.status === 'AKTIVAN').length,
     archived: ucenici.filter(u => u.status === 'ARHIVIRAN').length,
+    byGrade: (() => {
+      const grades = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 } as Record<1 | 2 | 3 | 4 | 5, number>;
+      ucenici.forEach((u) => {
+        if (u.prosjek === null || u.prosjek === undefined) return;
+        let g = Math.round(u.prosjek);
+        if (g < 1) g = 1;
+        if (g > 5) g = 5;
+        grades[g as 1 | 2 | 3 | 4 | 5] += 1;
+      });
+      return grades;
+    })(),
+    byRazred: (() => {
+      const map = new Map<string, { sum: number; count: number }>();
+      ucenici.forEach((u) => {
+        if (!u.razredNaziv || u.prosjek === null || u.prosjek === undefined) return;
+        const entry = map.get(u.razredNaziv) || { sum: 0, count: 0 };
+        entry.sum += u.prosjek;
+        entry.count += 1;
+        map.set(u.razredNaziv, entry);
+      });
+      return Array.from(map.entries()).map(([razred, data]) => ({
+        razred,
+        avg: data.count > 0 ? (data.sum / data.count).toFixed(2) : '0.00',
+        count: data.count,
+      }));
+    })() as Array<{ razred: string; avg: string; count: number }>,
   };
 
   // Export to CSV
@@ -702,73 +742,101 @@ export default function UceniciPage() {
         </button>
       </div>
 
-      {/* Stats Dashboard */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Ukupno učenika</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</p>
-            </div>
-            <div className="p-3 bg-blue-100 rounded-lg">
-              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Prosjek ocjena</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.avgProsjek}</p>
-              <p className="text-xs text-gray-500 mt-1">{stats.withProsjek} učenika sa ocjenama</p>
-            </div>
-            <div className="p-3 bg-emerald-100 rounded-lg">
-              <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Aktivni</p>
-              <p className="text-2xl font-bold text-emerald-600 mt-1">{stats.active}</p>
-              <p className="text-xs text-gray-500 mt-1">{stats.archived} arhiviranih</p>
-            </div>
-            <div className="p-3 bg-green-100 rounded-lg">
-              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Distribucija prosjeka</p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs text-emerald-600 font-semibold">{stats.excellent} odličan</span>
-                <span className="text-xs text-blue-600 font-semibold">{stats.good} dobar</span>
+      {/* Combined Stats Card */}
+      <div className="mb-6 bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+        <div className="space-y-3">
+          {/* Red 1: Ukupno + Prosjek u istom redu */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Ukupno */}
+            <div className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-yellow-600 font-semibold">{stats.average} dovoljan</span>
-                <span className="text-xs text-red-600 font-semibold">{stats.poor} nedovoljan</span>
+              <div>
+                <p className="text-xs text-gray-600">Ukupno učenika</p>
+                <p className="text-lg font-bold text-gray-900">{stats.total}</p>
               </div>
             </div>
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
+            {/* Aktivni */}
+            <div className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg">
+              <div className="p-2 bg-emerald-100 rounded-lg">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs text-gray-600">Aktivni učenici</p>
+                <p className="text-lg font-bold text-gray-900">{stats.active}</p>
+              </div>
             </div>
+            {/* Arhivirani */}
+            <div className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg">
+              <div className="p-2 bg-rose-100 rounded-lg">
+                <svg className="w-5 h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs text-gray-600">Arhivirani učenici</p>
+                <p className="text-lg font-bold text-gray-900">{stats.archived}</p>
+              </div>
+            </div>
+            {/* Prosjek */}
+            <div className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg">
+              <div className="p-2 bg-emerald-100 rounded-lg">
+                <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-xs text-gray-600">Prosjek ocjena</p>
+                <p className="text-lg font-bold text-gray-900">{stats.avgProsjek}</p>
+                <p className="text-[11px] text-gray-500">{stats.withProsjek} učenika sa ocjenama</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Red 2: Ocjene 1-5 u istom redu */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {[5, 4, 3, 2, 1].map((g) => {
+              const colors: Record<number, { iconBg: string; iconText: string; bar: string }> = {
+                5: { iconBg: 'bg-emerald-100', iconText: 'text-emerald-700', bar: 'bg-emerald-500' },
+                4: { iconBg: 'bg-cyan-100', iconText: 'text-cyan-700', bar: 'bg-cyan-500' },
+                3: { iconBg: 'bg-blue-100', iconText: 'text-blue-700', bar: 'bg-blue-500' },
+                2: { iconBg: 'bg-amber-100', iconText: 'text-amber-700', bar: 'bg-amber-500' },
+                1: { iconBg: 'bg-rose-100', iconText: 'text-rose-700', bar: 'bg-rose-500' },
+              };
+              const count = stats.byGrade[g as 1 | 2 | 3 | 4 | 5] || 0;
+              const percent =
+                stats.withProsjek && Number(stats.withProsjek) > 0
+                  ? Math.round((count / Number(stats.withProsjek)) * 100)
+                  : 0;
+              return (
+                <div key={g} className="flex items-center gap-3 p-3 border border-gray-100 rounded-lg">
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${colors[g].iconBg}`}>
+                    <span className={`text-sm font-bold ${colors[g].iconText}`}>{g}</span>
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between text-xs text-gray-600">
+                      <span className="font-semibold text-gray-800">{count} učenika</span>
+                      <span className="text-gray-500">{percent}%</span>
+                    </div>
+                    <div className="mt-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${colors[g].bar} rounded-full transition-all duration-300`}
+                        style={{ width: `${percent}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
+
 
       {/* All Filters Container */}
       <div className="mb-6 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -864,6 +932,7 @@ export default function UceniciPage() {
               <div className="flex items-center gap-1.5">
                 {[
                   { key: 'excellent', label: 'Odličan', color: 'emerald', icon: 'M5 13l4 4L19 7' },
+                  { key: 'very_good', label: 'Vrlo dobar', color: 'cyan', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
                   { key: 'good', label: 'Dobar', color: 'blue', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
                   { key: 'average', label: 'Dovoljan', color: 'yellow', icon: 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
                   { key: 'poor', label: 'Nedovoljan', color: 'red', icon: 'M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z' },
@@ -884,6 +953,27 @@ export default function UceniciPage() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Aktivni switch */}
+            <div className="flex items-center gap-2 px-2 py-2 bg-gray-50 rounded-lg border border-gray-200">
+              <span className="text-xs font-medium text-gray-600">Aktivan</span>
+              <button
+                type="button"
+                onClick={() => setShowOnlyActive(!showOnlyActive)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  showOnlyActive ? 'bg-emerald-500' : 'bg-gray-300'
+                }`}
+                role="switch"
+                aria-checked={showOnlyActive}
+                title="Prikaži samo aktivne učenike"
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                    showOnlyActive ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
             </div>
 
             {/* Advanced Filters Toggle */}
@@ -934,12 +1024,20 @@ export default function UceniciPage() {
                   </button>
                 </span>
               )}
-              {quickProsjekFilter && (
+                  {quickProsjekFilter && (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-md border border-emerald-200">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>
-                  {quickProsjekFilter === 'excellent' ? 'Odličan' : quickProsjekFilter === 'good' ? 'Dobar' : quickProsjekFilter === 'average' ? 'Dovoljan' : 'Nedovoljan'}
+                  {quickProsjekFilter === 'excellent' 
+                    ? 'Odličan' 
+                    : quickProsjekFilter === 'very_good'
+                      ? 'Vrlo dobar'
+                      : quickProsjekFilter === 'good' 
+                        ? 'Dobar' 
+                        : quickProsjekFilter === 'average' 
+                          ? 'Dovoljan' 
+                          : 'Nedovoljan'}
                   <button
                     onClick={() => setQuickProsjekFilter(null)}
                     className="hover:bg-emerald-100 rounded-full p-0.5 transition-colors"
@@ -1407,7 +1505,7 @@ export default function UceniciPage() {
                 <thead className="sticky top-0 z-20 bg-gradient-to-b from-gray-50 to-white border-b-2 border-gray-300 shadow-md">
                   <tr>
                     <th 
-                      className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/50"
+                      className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/50"
                       onClick={() => handleSort('prezime')}
                     >
                       <div className="flex items-center gap-2">
@@ -1416,7 +1514,7 @@ export default function UceniciPage() {
                       </div>
                     </th>
                     <th 
-                      className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/50"
+                      className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/50"
                       onClick={() => handleSort('datumRodjenja')}
                     >
                       <div className="flex items-center gap-2">
@@ -1425,7 +1523,7 @@ export default function UceniciPage() {
                       </div>
                     </th>
                     <th 
-                      className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/50"
+                      className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/50"
                       onClick={() => handleSort('razred')}
                     >
                       <div className="flex items-center gap-2">
@@ -1434,7 +1532,7 @@ export default function UceniciPage() {
                       </div>
                     </th>
                     <th 
-                      className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/50"
+                      className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors bg-gray-50/50"
                       onClick={() => handleSort('prosjek')}
                     >
                       <div className="flex items-center gap-2">
@@ -1442,7 +1540,7 @@ export default function UceniciPage() {
                         <SortIcon field="prosjek" />
                       </div>
                     </th>
-                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider bg-gray-50/50">
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider bg-gray-50/50">
                       Razred u mektebu
                     </th>
                   </tr>
