@@ -846,15 +846,15 @@ export default function UceniciPage() {
             <div className="flex">
               <button
                 onClick={() => setSelectedRazredNaziv(null)}
-                className={`flex-1 px-4 py-3 font-medium text-sm transition-colors relative ${
+                className={`flex-1 px-3 py-2 font-medium text-xs transition-colors relative ${
                   selectedRazredNaziv === null
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-700 hover:bg-gray-100'
                 }`}
               >
-                <span className="flex items-center justify-center gap-2">
+                <span className="flex items-center justify-center gap-1.5">
                   <span>SVI</span>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
                     selectedRazredNaziv === null
                       ? 'bg-blue-500 text-white'
                       : 'bg-gray-200 text-gray-700'
@@ -869,15 +869,15 @@ export default function UceniciPage() {
                   <button
                     key={razred.id}
                     onClick={() => setSelectedRazredNaziv(razred.id)}
-                    className={`flex-1 px-4 py-3 font-medium text-sm transition-colors relative border-l border-gray-200 ${
+                    className={`flex-1 px-3 py-2 font-medium text-xs transition-colors relative border-l border-gray-200 ${
                       selectedRazredNaziv === razred.id
                         ? `${colors.activeBg} ${colors.activeText}`
                         : 'text-gray-700 hover:bg-gray-100'
                     }`}
                   >
-                    <span className="flex items-center justify-center gap-2">
+                    <span className="flex items-center justify-center gap-1.5">
                       <span>{razred.naziv}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold border ${
                         selectedRazredNaziv === razred.id
                           ? `${colors.activeBg} ${colors.activeText} border-transparent`
                           : `${colors.bg} ${colors.text} ${colors.border}`

@@ -8,7 +8,7 @@ type Lekcija = {
   tezina: 1 | 2 | 3;
   redoslijed: number;
   aktivan: boolean;
-  tip?: 'ILMIHAL' | 'KURAN' | 'SUFARA';
+  tip?: 'ILMIHAL' | 'KURAN' | 'SUFARA' | 'SKOLA_HIFZA';
 };
 
 type TipLekcije = 'ILMIHAL' | 'KURAN' | 'SUFARA';
@@ -16,13 +16,18 @@ type TipLekcije = 'ILMIHAL' | 'KURAN' | 'SUFARA';
 type ApiRazred = {
   id: string;
   name: string;
-  ilmihal: 'ILMIHAL_I' | 'ILMIHAL_II' | 'ILMIHAL_III';
+  ilmihal: 'ILMIHAL_I' | 'ILMIHAL_II' | 'ILMIHAL_III' | 'SKOLA_HIFZA';
   status: boolean;
 };
 
 const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
 
-const labelGrupa = (razred: number) => (razred === 0 ? 'Predškolci' : `${razred}. razred`);
+const labelGrupa = (razred: number, razredName?: string) => {
+  if (razred === -1 && razredName) {
+    return razredName; // Za razrede bez brojeva (kao "Škola Hifza")
+  }
+  return razred === 0 ? 'Predškolci' : `${razred}. razred`;
+};
 
 const ilmihalInfo = (razred?: ApiRazred, fallbackRazred?: number) => {
   const isPreschool = fallbackRazred === 0 || razred?.name === '0';
@@ -32,6 +37,7 @@ const ilmihalInfo = (razred?: ApiRazred, fallbackRazred?: number) => {
 
   const ilmihal = razred?.ilmihal ?? 'ILMIHAL_I';
 
+  if (ilmihal === 'SKOLA_HIFZA') return { label: 'ŠKOLA HIFZA', color: 'bg-purple-100 text-purple-800 border-purple-200' };
   if (ilmihal === 'ILMIHAL_I') return { label: 'ILMIHAL I', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
   if (ilmihal === 'ILMIHAL_II') return { label: 'ILMIHAL II', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
   return { label: 'ILMIHAL III', color: 'bg-amber-100 text-amber-800 border-amber-200' };
@@ -62,11 +68,12 @@ type StepData = {
       SUFARA?: Lekcija[];
     };
   };
-  // Odabrane lekcije iz Kuran/Sufara po razredu
+  // Odabrane lekcije iz Kuran/Sufara/SkolaHifza po razredu
   odabraneLekcije: {
     [razredId: string]: {
       KURAN?: string[]; // IDs
       SUFARA?: string[]; // IDs
+      SKOLA_HIFZA?: string[]; // IDs
     };
   };
 };
@@ -86,7 +93,8 @@ export default function NastavniPlanPage() {
   const [globalLekcije, setGlobalLekcije] = useState<{
     KURAN: Lekcija[];
     SUFARA: Lekcija[];
-  }>({ KURAN: [], SUFARA: [] });
+    SKOLA_HIFZA: Lekcija[];
+  }>({ KURAN: [], SUFARA: [], SKOLA_HIFZA: [] });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
@@ -125,15 +133,17 @@ export default function NastavniPlanPage() {
   const lekcijePoRazredima = data.korak2.razredi.reduce((acc, razredId) => {
     const odabraneSufara = data.odabraneLekcije[razredId]?.SUFARA;
     const odabraneKuran = data.odabraneLekcije[razredId]?.KURAN;
+    const odabraneSkolaHifza = data.odabraneLekcije[razredId]?.SKOLA_HIFZA;
     const ilmihalLekcije = (data.korak3[razredId] ?? []).filter((l) => l.tip === 'ILMIHAL');
 
     acc[razredId] = {
       SUFARA: odabraneSufara && odabraneSufara.length > 0 ? odabraneSufara : null,
       KURAN: odabraneKuran && odabraneKuran.length > 0 ? odabraneKuran : null,
       ILMIHAL: ilmihalLekcije.length > 0 ? ilmihalLekcije : [],
+      SKOLA_HIFZA: odabraneSkolaHifza && odabraneSkolaHifza.length > 0 ? odabraneSkolaHifza : null,
     };
     return acc;
-  }, {} as Record<string, { SUFARA: string[] | null; KURAN: string[] | null; ILMIHAL: Lekcija[] }>);
+  }, {} as Record<string, { SUFARA: string[] | null; KURAN: string[] | null; ILMIHAL: Lekcija[]; SKOLA_HIFZA?: string[] | null }>);
 
   const payload = {
     id: editingPlanId ?? undefined,
@@ -223,15 +233,18 @@ export default function NastavniPlanPage() {
         if (entry.SUFARA) tips.push('SUFARA');
         if (entry.KURAN) tips.push('KURAN');
         if ((entry.ILMIHAL ?? []).length > 0) tips.push('ILMIHAL');
+        // SKOLA_HIFZA se automatski dodaje na backend-u, ne treba ga dodavati ovdje
         tipoviLekcija[razredId] = tips;
 
         generiraneLekcije[razredId] = {
           ...(entry.KURAN ? { KURAN: globalLekcije.KURAN } : {}),
           ...(entry.SUFARA ? { SUFARA: globalLekcije.SUFARA } : {}),
+          ...(entry.SKOLA_HIFZA ? { SKOLA_HIFZA: globalLekcije.SKOLA_HIFZA } : {}),
         };
         odabraneLekcije[razredId] = {
           ...(entry.KURAN ? { KURAN: entry.KURAN } : {}),
           ...(entry.SUFARA ? { SUFARA: entry.SUFARA } : {}),
+          ...(entry.SKOLA_HIFZA ? { SKOLA_HIFZA: entry.SKOLA_HIFZA } : {}),
         };
 
         const ilmihalLekcije = (entry.ILMIHAL ?? []).map((l: Lekcija, idx: number) => ({
@@ -287,20 +300,32 @@ export default function NastavniPlanPage() {
             const match = r.name.match(/\d+/);
             const nameNum = match ? Number(match[0]) : NaN;
             return { ...r, nameNum };
-          })
-          .filter((r) => !Number.isNaN(r.nameNum));
+          });
 
-        const uniqueSortedNums = Array.from(new Set(withParsed.map((r) => r.nameNum))).sort((a, b) => a - b);
-        const uiList =
+        // Razdvoji razrede sa brojevima i bez brojeva (kao što je "Škola Hifza")
+        const razrediSaBrojevima = withParsed.filter((r) => !Number.isNaN(r.nameNum));
+        const razrediBezBrojeva = withParsed.filter((r) => Number.isNaN(r.nameNum));
+
+        const uniqueSortedNums = Array.from(new Set(razrediSaBrojevima.map((r) => r.nameNum))).sort((a, b) => a - b);
+        const uiListSaBrojevima =
           uniqueSortedNums.length > 0
             ? uniqueSortedNums
-                .map((num) => withParsed.find((r) => r.nameNum === num)!)
+                .map((num) => razrediSaBrojevima.find((r) => r.nameNum === num)!)
                 .filter(Boolean)
                 .map((r) => ({ id: r.id, nameNum: r.nameNum, ilmihal: r.ilmihal }))
             : [];
 
+        // Dodaj razrede bez brojeva (kao što je "Škola Hifza") na kraj liste
+        const uiListBezBrojeva = razrediBezBrojeva.map((r) => ({ 
+          id: r.id, 
+          nameNum: -1, // Koristi -1 kao placeholder za razrede bez brojeva
+          ilmihal: r.ilmihal 
+        }));
+
+        const finalUiList = [...uiListSaBrojevima, ...uiListBezBrojeva];
+
         setRazrediData(withParsed);
-        setRazredi(uiList);
+        setRazredi(finalUiList);
       } catch (error) {
         console.warn('API razredi nije dostupan:', error);
         setRazrediData([]);
@@ -321,9 +346,10 @@ export default function NastavniPlanPage() {
       setLekcijeLoading(true);
       setLekcijeError(null);
       try {
-        const [kuranRes, sufaraRes] = await Promise.all([
+        const [kuranRes, sufaraRes, skolaHifzaRes] = await Promise.all([
           axios.get<Lekcija[]>(`${API_URL}/lekcije`, { params: { tip: 'KURAN' }, timeout: 5000 }),
           axios.get<Lekcija[]>(`${API_URL}/lekcije`, { params: { tip: 'SUFARA' }, timeout: 5000 }),
+          axios.get<Lekcija[]>(`${API_URL}/lekcije`, { params: { tip: 'SKOLA_HIFZA' }, timeout: 5000 }),
         ]);
 
         const sortAndNormalize = (list: Lekcija[]) =>
@@ -334,10 +360,11 @@ export default function NastavniPlanPage() {
         setGlobalLekcije({
           KURAN: sortAndNormalize(kuranRes.data ?? []),
           SUFARA: sortAndNormalize(sufaraRes.data ?? []),
+          SKOLA_HIFZA: sortAndNormalize(skolaHifzaRes.data ?? []),
         });
       } catch (error) {
         console.warn('Neuspješno dohvaćanje lekcija', error);
-        setLekcijeError('Nisam uspio dohvatiti lekcije (KURAN/SUFARA).');
+        setLekcijeError('Nisam uspio dohvatiti lekcije (KURAN/SUFARA/SKOLA_HIFZA).');
       } finally {
         setLekcijeLoading(false);
       }
@@ -345,6 +372,44 @@ export default function NastavniPlanPage() {
 
     fetchLekcije();
   }, []);
+
+  // Automatski dodaj lekcije škole hifza kada se odabere razred "Škola Hifza"
+  useEffect(() => {
+    for (const razredId of data.korak2.razredi) {
+      const razredFull = razrediData.find((rr) => rr.id === razredId);
+      if (razredFull?.ilmihal === 'SKOLA_HIFZA') {
+        // Ako nema generiranih lekcija, automatski ih dodaj
+        if (!data.generiraneLekcije[razredId]?.SKOLA_HIFZA && globalLekcije.SKOLA_HIFZA.length > 0) {
+          setData((prev) => ({
+            ...prev,
+            generiraneLekcije: {
+              ...prev.generiraneLekcije,
+              [razredId]: {
+                ...prev.generiraneLekcije[razredId],
+                SKOLA_HIFZA: globalLekcije.SKOLA_HIFZA,
+              },
+            },
+          }));
+        }
+        
+        // Ako nema odabranih lekcija, automatski ih selektuj sve
+        const odabrane = data.odabraneLekcije[razredId]?.SKOLA_HIFZA ?? [];
+        const generirane = data.generiraneLekcije[razredId]?.SKOLA_HIFZA ?? globalLekcije.SKOLA_HIFZA ?? [];
+        if (odabrane.length === 0 && generirane.length > 0) {
+          setData((prev) => ({
+            ...prev,
+            odabraneLekcije: {
+              ...prev.odabraneLekcije,
+              [razredId]: {
+                ...prev.odabraneLekcije[razredId],
+                SKOLA_HIFZA: generirane.map((l) => l.id),
+              },
+            },
+          }));
+        }
+      }
+    }
+  }, [data.korak2.razredi, globalLekcije.SKOLA_HIFZA, razrediData]);
 
   const toggleTipLekcije = (razredId: string, tip: TipLekcije) => {
     setData((prev) => {
@@ -441,12 +506,34 @@ export default function NastavniPlanPage() {
     // Lekcije se već fetchaju globalno na mount
   };
 
-  const toggleOdabranaLekcija = (razredId: string, tip: 'KURAN' | 'SUFARA', lekcijaId: string) => {
+  const toggleOdabranaLekcija = (razredId: string, tip: 'KURAN' | 'SUFARA' | 'SKOLA_HIFZA', lekcijaId: string) => {
     setData((prev) => {
       const currentOdabrane = prev.odabraneLekcije[razredId]?.[tip] ?? [];
       const isOdabrana = currentOdabrane.includes(lekcijaId);
       
       let newOdabrane: string[];
+      
+      // Za SKOLA_HIFZA ne dodajemo lekcije u korak3, samo u odabraneLekcije
+      if (tip === 'SKOLA_HIFZA') {
+        if (isOdabrana) {
+          newOdabrane = currentOdabrane.filter((id) => id !== lekcijaId);
+        } else {
+          newOdabrane = [...currentOdabrane, lekcijaId];
+        }
+        
+        return {
+          ...prev,
+          odabraneLekcije: {
+            ...prev.odabraneLekcije,
+            [razredId]: {
+              ...prev.odabraneLekcije[razredId],
+              [tip]: newOdabrane,
+            },
+          },
+        };
+      }
+      
+      // Za KURAN i SUFARA, dodajemo u korak3
       let lekcije = [...(prev.korak3[razredId] ?? [])];
       
       if (isOdabrana) {
@@ -552,6 +639,24 @@ export default function NastavniPlanPage() {
       const razredi = exists
         ? prev.korak2.razredi.filter((x) => x !== r.id)
         : [...prev.korak2.razredi, r.id];
+
+      // Ako se dodaje razred "Škola Hifza", automatski dodaj sve lekcije škole hifza
+      if (!exists && r.ilmihal === 'SKOLA_HIFZA') {
+        const skolaHifzaLekcije = globalLekcije.SKOLA_HIFZA ?? [];
+        const skolaHifzaIds = skolaHifzaLekcije.map((l) => l.id);
+
+        return {
+          ...prev,
+          korak2: { razredi },
+          odabraneLekcije: {
+            ...prev.odabraneLekcije,
+            [r.id]: {
+              ...prev.odabraneLekcije[r.id],
+              SKOLA_HIFZA: skolaHifzaIds,
+            },
+          },
+        };
+      }
 
       return {
         ...prev,
@@ -743,7 +848,7 @@ export default function NastavniPlanPage() {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <div className="text-xs text-gray-500 font-medium">Razred</div>
-                  <div className="text-lg font-bold text-gray-900">{labelGrupa(r.nameNum)}</div>
+                  <div className="text-lg font-bold text-gray-900">{labelGrupa(r.nameNum, razredObj?.name)}</div>
                 </div>
               </div>
               <div className={`inline-flex text-xs px-3 py-1 rounded-full border font-semibold ${info.color}`}>
@@ -765,6 +870,8 @@ export default function NastavniPlanPage() {
       )}
       {data.korak2.razredi.map((rId) => {
         const razredObj = razredi.find((r) => r.id === rId);
+        const razredFull = razrediData.find((rr) => rr.id === rId);
+        const isSkolaHifza = razredFull?.ilmihal === 'SKOLA_HIFZA';
         const sveLekcije = data.korak3[rId] ?? [];
         // Prikaži samo ILMIHAL lekcije (ne prikazuj KURAN i SUFARA)
         const lekcije = sveLekcije.filter((l) => {
@@ -775,7 +882,9 @@ export default function NastavniPlanPage() {
           // Prikaži samo ILMIHAL
           return l.tip === 'ILMIHAL';
         });
-        const hasLekcije = lekcije.length > 0;
+        const skolaHifzaLekcije = data.odabraneLekcije[rId]?.SKOLA_HIFZA ?? [];
+        // Za razred "Škola Hifza", ima lekcija ako ima ILMIHAL lekcije ILI lekcije škole hifza
+        const hasLekcije = isSkolaHifza ? (lekcije.length > 0 || skolaHifzaLekcije.length > 0) : lekcije.length > 0;
         return (
           <div key={rId} className="border border-gray-200 rounded-lg bg-white transition-colors">
             <button
@@ -802,7 +911,7 @@ export default function NastavniPlanPage() {
                 )}
                 
                 {/* Naziv razreda */}
-                <span className="text-base font-bold text-gray-900">{labelGrupa(razredObj?.nameNum ?? 0)}</span>
+                <span className="text-base font-bold text-gray-900">{labelGrupa(razredObj?.nameNum ?? 0, razrediData.find((rr) => rr.id === rId)?.name)}</span>
                 
                 {/* Ilmihal badge - desno */}
                 <div className="flex-1" />
@@ -835,12 +944,16 @@ export default function NastavniPlanPage() {
               const ilmihalLekcije = sveLekcije.filter((l) => l.tip === 'ILMIHAL' || (!l.tip && !l.id.toLowerCase().includes('kuran') && !l.id.toLowerCase().includes('sufara')));
               const kuranLekcije = sveLekcije.filter((l) => l.tip === 'KURAN');
               const sufaraLekcije = sveLekcije.filter((l) => l.tip === 'SUFARA');
-              const ukupno = ilmihalLekcije.length + kuranLekcije.length + sufaraLekcije.length;
+              const skolaHifzaCount = data.odabraneLekcije[rId]?.SKOLA_HIFZA?.length ?? 0;
+              const ukupno = ilmihalLekcije.length + kuranLekcije.length + sufaraLekcije.length + skolaHifzaCount;
               
               // Provjeri da li je SUFARA aktivan
               const hasSufara = (data.tipoviLekcija[rId] ?? []).includes('SUFARA');
               // Broj odabranih KURAN lekcija
               const kuranCount = data.odabraneLekcije[rId]?.KURAN?.length ?? 0;
+              // Provjeri da li je razred "Škola Hifza"
+              const razredFull = razrediData.find((rr) => rr.id === rId);
+              const isSkolaHifza = razredFull?.ilmihal === 'SKOLA_HIFZA';
               
               return (
                 <div className="mx-4 mb-4">
@@ -1208,9 +1321,22 @@ export default function NastavniPlanPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 text-sm bg-gray-50 rounded-lg border border-gray-200">
-                    Nema dodanih lekcija. Aktiviraj tipove lekcija iznad i odaberi ih.
-                  </div>
+                  (() => {
+                    const razredFull = razrediData.find((rr) => rr.id === rId);
+                    const isSkolaHifza = razredFull?.ilmihal === 'SKOLA_HIFZA';
+                    const skolaHifzaLekcije = data.odabraneLekcije[rId]?.SKOLA_HIFZA ?? [];
+                    
+                    // Ne prikazuj poruku za razred "Škola Hifza" ako ima lekcije škole hifza
+                    if (isSkolaHifza && skolaHifzaLekcije.length > 0) {
+                      return null;
+                    }
+                    
+                    return (
+                      <div className="text-center py-8 text-gray-500 text-sm bg-gray-50 rounded-lg border border-gray-200">
+                        Nema dodanih lekcija. Aktiviraj tipove lekcija iznad i odaberi ih.
+                      </div>
+                    );
+                  })()
                 )}
 
                 {/* Dodaj ILMIHAL lekciju */}
@@ -1271,6 +1397,67 @@ export default function NastavniPlanPage() {
                                     checked={isOdabrana}
                                     onChange={() => toggleOdabranaLekcija(rId, 'KURAN', lekcija.id)}
                                     className="w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500 focus:ring-1"
+                                  />
+                                  <span className="text-sm flex-1 text-gray-700">
+                                    {lekcija.naslov}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* SKOLA_HIFZA Lekcije Selection Section */}
+                {(() => {
+                  const razredFull = razrediData.find((rr) => rr.id === rId);
+                  const isSkolaHifza = razredFull?.ilmihal === 'SKOLA_HIFZA';
+                  
+                  if (!isSkolaHifza) return null;
+                  
+                  const generirane = data.generiraneLekcije[rId]?.SKOLA_HIFZA ?? globalLekcije.SKOLA_HIFZA ?? [];
+                  const odabrane = data.odabraneLekcije[rId]?.SKOLA_HIFZA ?? [];
+                  const isLoading = lekcijeLoading;
+                  const loadError = lekcijeError;
+                  
+                  return (
+                    <div className="bg-white rounded-lg p-4 border border-gray-200">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-medium text-gray-900">Lekcije Škole Hifza</h3>
+                        {odabrane.length > 0 && (
+                          <span className="text-xs font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded">
+                            {odabrane.length} odabrano
+                          </span>
+                        )}
+                      </div>
+                      <div className="border border-gray-200 rounded-lg p-3 max-h-64 overflow-y-auto bg-gray-50">
+                        {isLoading && (
+                          <div className="text-sm text-gray-500">Učitavam lekcije...</div>
+                        )}
+                        {loadError && (
+                          <div className="text-sm text-red-600">{loadError}</div>
+                        )}
+                        {!isLoading && !loadError && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {generirane.map((lekcija) => {
+                              const isOdabrana = odabrane.includes(lekcija.id);
+                              return (
+                                <label
+                                  key={lekcija.id}
+                                  className={`flex items-center gap-2.5 p-2 rounded cursor-pointer transition-colors border ${
+                                    isOdabrana
+                                      ? 'bg-purple-50 border-purple-200'
+                                      : 'bg-white border-gray-200 hover:border-gray-300'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isOdabrana}
+                                    onChange={() => toggleOdabranaLekcija(rId, 'SKOLA_HIFZA', lekcija.id)}
+                                    className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500 focus:ring-1"
                                   />
                                   <span className="text-sm flex-1 text-gray-700">
                                     {lekcija.naslov}

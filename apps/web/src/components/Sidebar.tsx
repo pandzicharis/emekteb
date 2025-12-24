@@ -1,6 +1,7 @@
 import { useState, useEffect, type MouseEvent, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import axios from 'axios';
 
 type MenuEntry =
   | { type: 'item'; path: string; name: string; icon: ReactNode }
@@ -12,7 +13,7 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
-const getMenuItems = (uloga: string): MenuEntry[] => {
+const getMenuItems = (uloga: string, hasSkolaHifza: boolean = false): MenuEntry[] => {
   const baseItems: MenuEntry[] = [
     {
       type: 'item',
@@ -28,6 +29,40 @@ const getMenuItems = (uloga: string): MenuEntry[] => {
 
   // Za MUALLIM, dodajemo grupu Nastava
   if (uloga === 'MUALLIM') {
+    const nastavaItems = [
+      {
+        path: '/casovi',
+        name: 'Časovi',
+        icon: (
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+      },
+      {
+        path: '/ucenici',
+        name: 'Učenici',
+        icon: (
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+        ),
+      },
+    ];
+
+    // Dodaj "Škola hifza" samo ako muallim ima SKOLA_HIFZA razred
+    if (hasSkolaHifza) {
+      nastavaItems.push({
+        path: '/skola-hifza',
+        name: 'Škola hifza',
+        icon: (
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+        ),
+      });
+    }
+
     baseItems.push(
       {
         type: 'group',
@@ -37,26 +72,7 @@ const getMenuItems = (uloga: string): MenuEntry[] => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6l-2 2H6a2 2 0 00-2 2v7a2 2 0 002 2h4l2-2 2 2h4a2 2 0 002-2v-7a2 2 0 00-2-2h-4l-2-2z" />
           </svg>
         ),
-        items: [
-          {
-            path: '/casovi',
-            name: 'Časovi',
-            icon: (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            ),
-          },
-          {
-            path: '/ucenici',
-            name: 'Učenici',
-            icon: (
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
-            ),
-          },
-        ],
+        items: nastavaItems,
       }
     );
     return baseItems;
@@ -154,9 +170,35 @@ const getMenuItems = (uloga: string): MenuEntry[] => {
 export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const location = useLocation();
   const { user, logout } = useAuth();
-  const menuItems = getMenuItems(user?.uloga || '');
+  const [hasSkolaHifza, setHasSkolaHifza] = useState(false);
+  const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
+
+  // Provjeri da li muallim ima SKOLA_HIFZA razred
+  useEffect(() => {
+    if (user?.uloga === 'MUALLIM') {
+      const checkSkolaHifza = async () => {
+        try {
+          const response = await axios.get(`${API_URL}/muallimi/dashboard`, { timeout: 8000 });
+          const dashboardData = response.data;
+          // Provjeri da li postoji razred sa SKOLA_HIFZA u rasporedu
+          const hasHifza = dashboardData?.razredi?.some(
+            (r: any) => r.razred?.ilmihal === 'SKOLA_HIFZA' || r.razred?.ilmihal === 'ŠKOLA HIFZA'
+          ) || dashboardData?.raspored?.some(
+            (item: any) => item.grupa?.razred?.ilmihal === 'SKOLA_HIFZA' || item.grupa?.razred?.ilmihal === 'ŠKOLA HIFZA'
+          );
+          setHasSkolaHifza(!!hasHifza);
+        } catch (error) {
+          console.warn('Neuspješno dohvaćanje dashboard podataka za provjeru Škole Hifza', error);
+          setHasSkolaHifza(false);
+        }
+      };
+      checkSkolaHifza();
+    }
+  }, [user?.uloga, API_URL]);
+
+  const menuItems = getMenuItems(user?.uloga || '', hasSkolaHifza);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    'Nastava': location.pathname.startsWith('/casovi') || location.pathname.startsWith('/lekcije') || location.pathname.startsWith('/setup-nastavna-godina') || location.pathname.startsWith('/nastavni-plan') || location.pathname.startsWith('/ucenici'),
+    'Nastava': location.pathname.startsWith('/casovi') || location.pathname.startsWith('/lekcije') || location.pathname.startsWith('/setup-nastavna-godina') || location.pathname.startsWith('/nastavni-plan') || location.pathname.startsWith('/ucenici') || location.pathname.startsWith('/skola-hifza'),
     'Postavke': location.pathname.startsWith('/settings'),
   });
   
@@ -169,7 +211,7 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
       }));
     }
     // Automatski otvori Nastava grupu ako je aktivna ruta
-    if (location.pathname.startsWith('/casovi') || location.pathname.startsWith('/lekcije') || location.pathname.startsWith('/setup-nastavna-godina') || location.pathname.startsWith('/nastavni-plan') || location.pathname.startsWith('/ucenici')) {
+    if (location.pathname.startsWith('/casovi') || location.pathname.startsWith('/lekcije') || location.pathname.startsWith('/setup-nastavna-godina') || location.pathname.startsWith('/nastavni-plan') || location.pathname.startsWith('/ucenici') || location.pathname.startsWith('/skola-hifza')) {
       setOpenGroups(prev => ({
         ...prev,
         'Nastava': true,
@@ -342,7 +384,9 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
                                     isOpen ? 'gap-3 px-6' : 'justify-center px-0'
                                   } py-2 ${
                                     isActive
-                                      ? 'bg-blue-600 text-white'
+                                      ? child.path === '/skola-hifza'
+                                        ? 'bg-purple-600 text-white'
+                                        : 'bg-blue-600 text-white'
                                       : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                                   }`}
                                   title={!isOpen ? child.name : undefined}

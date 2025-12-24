@@ -20,6 +20,11 @@ interface WeekendDatePickerProps {
    * Korisno kada ima samo jedan tip dana (npr. samo subota ili samo nedjelja).
    */
   singleColumn?: boolean;
+  /**
+   * Maksimalni datum koji se može odabrati. Ako nije zadano, nema ograničenja.
+   * Korisno za ograničavanje izbora samo na prošle datume.
+   */
+  maxDate?: Date;
 }
 
 export default function WeekendDatePicker({
@@ -31,6 +36,7 @@ export default function WeekendDatePicker({
   casoviCounts = {},
   allowedDays,
   singleColumn = false,
+  maxDate,
 }: WeekendDatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -52,7 +58,7 @@ export default function WeekendDatePicker({
     };
   }, [isOpen, setIsOpen]);
 
-  // Generiši sve vikend dane u opsegu, opciono filtrirane po allowedDays
+  // Generiši sve vikend dane u opsegu, opciono filtrirane po allowedDays i maxDate
   const getWeekendDates = (): Date[] => {
     const weekends: Date[] = [];
     const current = new Date(startDate);
@@ -60,8 +66,12 @@ export default function WeekendDatePicker({
 
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
+    
+    // Ako je maxDate zadano, koristi ga kao maksimalni datum
+    const effectiveEndDate = maxDate ? new Date(maxDate) : end;
+    effectiveEndDate.setHours(23, 59, 59, 999);
 
-    while (current <= end) {
+    while (current <= end && current <= effectiveEndDate) {
       const dayOfWeek = current.getDay();
       // 0 = nedjelja, 6 = subota
       if (dayOfWeek === 0 || dayOfWeek === 6) {
@@ -139,8 +149,28 @@ export default function WeekendDatePicker({
 
 
   const handleDateClick = (date: Date) => {
+    // Ako je maxDate zadano, proveri da li je datum posle maxDate
+    if (maxDate) {
+      const maxDateCopy = new Date(maxDate);
+      maxDateCopy.setHours(23, 59, 59, 999);
+      const dateCopy = new Date(date);
+      dateCopy.setHours(0, 0, 0, 0);
+      if (dateCopy > maxDateCopy) {
+        return; // Ne dozvoli klik na datume posle maxDate
+      }
+    }
     onDateSelect(date);
     setIsOpen(false);
+  };
+  
+  // Proveri da li je datum dozvoljen za izbor (nije posle maxDate)
+  const isDateAllowed = (date: Date): boolean => {
+    if (!maxDate) return true;
+    const maxDateCopy = new Date(maxDate);
+    maxDateCopy.setHours(23, 59, 59, 999);
+    const dateCopy = new Date(date);
+    dateCopy.setHours(0, 0, 0, 0);
+    return dateCopy <= maxDateCopy;
   };
 
   return (
@@ -210,6 +240,7 @@ export default function WeekendDatePicker({
                   
                   if (isTodayInRange) {
                     const isTodaySelected = selectedDate && isSameDate(today, selectedDate);
+                    const isTodayAllowed = isDateAllowed(today);
                     const dayName = today.getDay() === 0 ? 'Nedjelja' : 'Subota';
                     const dayNumber = today.getDate();
                     const month = today.getMonth() + 1;
@@ -219,11 +250,14 @@ export default function WeekendDatePicker({
                       <button
                         type="button"
                         onClick={() => handleDateClick(today)}
+                        disabled={!isTodayAllowed}
                         className={`
                           w-full text-left px-4 py-3 rounded-lg border transition-all duration-200
-                          ${isTodaySelected
-                            ? 'border-blue-500 bg-blue-50 shadow-md'
-                            : 'border-slate-300 bg-slate-50 hover:border-slate-400 hover:bg-slate-100'
+                          ${!isTodayAllowed
+                            ? 'opacity-50 cursor-not-allowed border-slate-200 bg-slate-50'
+                            : isTodaySelected
+                              ? 'border-blue-500 bg-blue-50 shadow-md'
+                              : 'border-slate-300 bg-slate-50 hover:border-slate-400 hover:bg-slate-100'
                           }
                         `}
                       >
@@ -341,6 +375,7 @@ export default function WeekendDatePicker({
                           const month = date.getMonth() + 1;
                           const year = date.getFullYear();
                           const isPast = isDatePast(date);
+                          const isAllowed = isDateAllowed(date);
                           const dayOfWeek = date.getDay();
                           const isSunday = dayOfWeek === 0;
                           const dayShort = isSunday ? 'Ned' : 'Sub';
@@ -352,11 +387,14 @@ export default function WeekendDatePicker({
                               key={idx}
                               type="button"
                               onClick={() => handleDateClick(date)}
+                              disabled={!isAllowed}
                               className={`
                                 w-full text-left px-4 py-3 rounded-lg border transition-all duration-200
-                                ${isSelected
-                                  ? 'border-blue-500 bg-gradient-to-r from-blue-50 to-indigo-50 shadow-md'
-                                  : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
+                                ${!isAllowed
+                                  ? 'opacity-50 cursor-not-allowed border-slate-200 bg-slate-50'
+                                  : isSelected
+                                    ? 'border-blue-500 bg-gradient-to-r from-blue-50 to-indigo-50 shadow-md'
+                                    : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
                                 }
                               `}
                             >
@@ -420,16 +458,20 @@ export default function WeekendDatePicker({
                             const month = date.getMonth() + 1;
                             const year = date.getFullYear();
                             const isPast = isDatePast(date);
+                            const isAllowed = isDateAllowed(date);
 
                             return (
                               <button
                                 type="button"
                                 onClick={() => handleDateClick(date)}
+                                disabled={!isAllowed}
                                 className={`
                                   text-left px-4 py-3 rounded-lg border transition-all duration-200
-                                  ${isSelected
-                                    ? 'border-blue-500 bg-gradient-to-r from-blue-50 to-indigo-50 shadow-md'
-                                    : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
+                                  ${!isAllowed
+                                    ? 'opacity-50 cursor-not-allowed border-slate-200 bg-slate-50'
+                                    : isSelected
+                                      ? 'border-blue-500 bg-gradient-to-r from-blue-50 to-indigo-50 shadow-md'
+                                      : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
                                   }
                                 `}
                               >
@@ -486,16 +528,20 @@ export default function WeekendDatePicker({
                             const month = date.getMonth() + 1;
                             const year = date.getFullYear();
                             const isPast = isDatePast(date);
+                            const isAllowed = isDateAllowed(date);
 
                             return (
                               <button
                                 type="button"
                                 onClick={() => handleDateClick(date)}
+                                disabled={!isAllowed}
                                 className={`
                                   text-left px-4 py-3 rounded-lg border transition-all duration-200
-                                  ${isSelected
-                                    ? 'border-blue-500 bg-gradient-to-r from-blue-50 to-indigo-50 shadow-md'
-                                    : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
+                                  ${!isAllowed
+                                    ? 'opacity-50 cursor-not-allowed border-slate-200 bg-slate-50'
+                                    : isSelected
+                                      ? 'border-blue-500 bg-gradient-to-r from-blue-50 to-indigo-50 shadow-md'
+                                      : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/50'
                                   }
                                 `}
                               >

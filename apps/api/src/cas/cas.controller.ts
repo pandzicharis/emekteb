@@ -233,6 +233,55 @@ export class CasController {
       },
     });
 
+    // Pronađi sve SkolaHifza časove u nastavnoj godini
+    // Prvo pronađi SkolaHifza za nastavnu godinu
+    const skolaHifza = await this.prisma.skolaHifza.findUnique({
+      where: { nastavnaGodinaId: nastavnaGodina.id },
+    });
+
+    const skolaHifzaCasoviMap = new Map<string, any>();
+    if (skolaHifza) {
+      // Pronađi sve SkolaHifza slotove koji pripadaju rasporedima ovog muallima
+      const skolaHifzaRasporediIds = rasporedi
+        .filter((r) => r.grupa.razredNastavnaGodina.razred.ilmihal === 'SKOLA_HIFZA')
+        .map((r) => r.id);
+
+      if (skolaHifzaRasporediIds.length > 0) {
+        const skolaHifzaCasovi = await this.prisma.skolaHifzaCas.findMany({
+          where: {
+            skolaHifzaId: skolaHifza.id,
+            slotId: { in: skolaHifzaRasporediIds },
+            datum: {
+              gte: nastavnaGodina.datumOd,
+              lte: nastavnaGodina.datumDo,
+            },
+          },
+          include: {
+            prisustva: {
+              include: {
+                ucenik: {
+                  include: {
+                    korisnik: {
+                      select: {
+                        ime: true,
+                        prezime: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        skolaHifzaCasovi.forEach((cas) => {
+          const dateKey = cas.datum.toISOString().split('T')[0];
+          const key = `${cas.slotId}-${dateKey}`;
+          skolaHifzaCasoviMap.set(key, cas);
+        });
+      }
+    }
+
     // Mapa časova po rasporedId i datumu (YYYY-MM-DD format)
     const casoviMap = new Map<string, any>();
     casovi.forEach((cas) => {
@@ -262,15 +311,20 @@ export class CasController {
         for (const raspored of danRasporedi) {
           const casKey = `${raspored.id}-${dateKey}`;
           const cas = casoviMap.get(casKey);
+          const isSkolaHifza = raspored.grupa.razredNastavnaGodina.razred.ilmihal === 'SKOLA_HIFZA';
+          
+          // Proveri i SkolaHifzaCas ako je SkolaHifza slot
+          const skolaHifzaCas = isSkolaHifza ? skolaHifzaCasoviMap.get(casKey) : null;
 
-          if (cas) {
-            // Postoji čas za ovaj raspored i datum
+          if (cas || skolaHifzaCas) {
+            // Postoji čas za ovaj raspored i datum (regularni ili SkolaHifza)
+            const activeCas = cas || skolaHifzaCas;
             result.push({
-              id: cas.id,
+              id: activeCas.id,
               datum: dateKey,
-              tipovi: cas.tipovi,
-              napomena: cas.napomena,
-              kreiran: cas.kreiran.toISOString(),
+              tipovi: cas?.tipovi || [],
+              napomena: activeCas.napomena,
+              kreiran: activeCas.kreiran ? activeCas.kreiran.toISOString() : null,
               raspored: {
                 id: raspored.id,
                 dan: raspored.dan,
@@ -287,11 +341,11 @@ export class CasController {
                   },
                 },
               },
-              lekcije: cas.lekcije.map((cl: any) => ({
+              lekcije: cas?.lekcije?.map((cl: any) => ({
                 id: cl.lekcija.id,
                 naslov: cl.lekcija.naslov,
-              })),
-              prisustva: cas.prisustva.map((p: any) => ({
+              })) || [],
+              prisustva: (cas?.prisustva || skolaHifzaCas?.prisustva || []).map((p: any) => ({
                 ucenikId: p.ucenikId,
                 status: p.status,
                 ucenik: {

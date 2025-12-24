@@ -41,10 +41,92 @@ export class UcenikService {
     return Math.round(prosjek * 100) / 100; // Zaokruži na 2 decimale
   }
 
-  async findAll(page: number = 1, limit: number = 20, razredNaziv?: string) {
+  async findAll(page: number = 1, limit: number = 20, razredNaziv?: string, all: boolean = false) {
     const skip = (page - 1) * limit;
     
-    this.logger.log(`findAll called with page=${page}, limit=${limit}, skip=${skip}, razredNaziv=${razredNaziv}`);
+    this.logger.log(`findAll called with page=${page}, limit=${limit}, skip=${skip}, razredNaziv=${razredNaziv}, all=${all}`);
+    
+    // Ako je all=true, ignoriraj aktivnu nastavnu godinu i vrati sve učenike
+    if (all) {
+      // Ako je prosleđen razredNaziv, ne možemo filtrirati bez aktivne nastavne godine
+      if (razredNaziv) {
+        return {
+          data: [],
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+        };
+      }
+      
+      // Vrati sve učenike bez filtriranja po aktivnoj nastavnoj godini
+      const total = await this.prisma.ucenik.count();
+      const skipValue = Number(skip);
+      const takeValue = Number(limit);
+      
+      const uceniciRaw = await this.prisma.ucenik.findMany({
+        skip: skipValue,
+        take: takeValue,
+        include: {
+          korisnik: {
+            select: {
+              id: true,
+              ime: true,
+              prezime: true,
+              email: true,
+              fotografija: true,
+              aktivan: true,
+            },
+          },
+          obrazovanje: {
+            select: {
+              nivoObrazovanja: true,
+              razred: true,
+              mektebStepen: true,
+            },
+          },
+        },
+      });
+
+      // Sortiraj u memoriji
+      uceniciRaw.sort((a, b) => {
+        const prezimeA = a.korisnik?.prezime || '';
+        const prezimeB = b.korisnik?.prezime || '';
+        if (prezimeA !== prezimeB) {
+          return prezimeA.localeCompare(prezimeB);
+        }
+        const imeA = a.korisnik?.ime || '';
+        const imeB = b.korisnik?.ime || '';
+        return imeA.localeCompare(imeB);
+      });
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        data: uceniciRaw.map((ucenik) => ({
+          id: ucenik.id,
+          ime: ucenik.korisnik?.ime || null,
+          prezime: ucenik.korisnik?.prezime || null,
+          email: ucenik.korisnik?.email || null,
+          fotografija: ucenik.korisnik?.fotografija || null,
+          aktivan: ucenik.korisnik?.aktivan ?? true,
+          datumRodjenja: ucenik.datumRodjenja,
+          spol: ucenik.spol,
+          mjestoRodjenja: ucenik.mjestoRodjenja,
+          adresaStanovanja: ucenik.adresaStanovanja,
+          status: ucenik.status,
+          opis: ucenik.posebnePotrebeOpis || null,
+          obrazovanje: ucenik.obrazovanje,
+          prosjek: null,
+          razredNaziv: null,
+          eksterniId: ucenik.eksterniId,
+        })),
+        total,
+        page,
+        limit,
+        totalPages,
+      };
+    }
     
     // Dohvati aktivnu nastavnu godinu
     const nastavnaGodina = await this.getActiveNastavnaGodina();

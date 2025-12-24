@@ -10,10 +10,29 @@ async function main() {
 
   try {
     // Brisanje u zavisnosti od foreign key-ova
+    // Prvo SkolaHifza tabele
+    await prisma.skolaHifzaPrisustvo.deleteMany({});
+    console.log('✅ Obrisana SkolaHifza prisustva');
+
+    await prisma.skolaHifzaCas.deleteMany({});
+    console.log('✅ Obrisani SkolaHifza časovi');
+
+    await prisma.skolaHifzaUcenik.deleteMany({});
+    console.log('✅ Obrisani SkolaHifza učenici');
+
+    await prisma.skolaHifzaMuallim.deleteMany({});
+    console.log('✅ Obrisani SkolaHifza muallimi');
+
+    await prisma.skolaHifza.deleteMany({});
+    console.log('✅ Obrisana SkolaHifza');
+
     await prisma.casOcjena.deleteMany({});
     console.log('✅ Obrisane ocjene');
 
-    await prisma.prisustvo.deleteMany({});
+    await prisma.casLekcija.deleteMany({});
+    console.log('✅ Obrisane veze cas-lekcija');
+
+    await prisma.casPrisustvo.deleteMany({});
     console.log('✅ Obrisano prisustvo');
 
     await prisma.cas.deleteMany({});
@@ -31,11 +50,11 @@ async function main() {
     await prisma.razredNastavnaGodina.deleteMany({});
     console.log('✅ Obrisane veze razred-nastavna godina');
 
+    await prisma.nastavniPlanRazredLekcija.deleteMany({});
+    console.log('✅ Obrisane veze nastavni plan-razred-lekcija');
+
     await prisma.nastavniPlanRazred.deleteMany({});
     console.log('✅ Obrisane veze nastavni plan-razred');
-
-    await prisma.nastavniPlanLekcija.deleteMany({});
-    console.log('✅ Obrisane veze nastavni plan-lekcija');
 
     await prisma.roditelj.deleteMany({});
     console.log('✅ Obrisani roditelji');
@@ -49,11 +68,11 @@ async function main() {
     await prisma.ucenik.deleteMany({});
     console.log('✅ Obrisani učenici');
 
-    await prisma.muallim.deleteMany({});
-    console.log('✅ Obrisani muallimi');
-
     await prisma.korisnik.deleteMany({});
     console.log('✅ Obrisani korisnici');
+
+    await prisma.razredLekcija.deleteMany({});
+    console.log('✅ Obrisane veze razred-lekcija');
 
     await prisma.lekcija.deleteMany({});
     console.log('✅ Obrisane lekcije');

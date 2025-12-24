@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { TipLekcije } from '@prisma/client';
+import { TipLekcije, Ilmihal } from '@prisma/client';
 
 type PayloadLekcije = {
   SUFARA: string[] | null;
@@ -14,6 +14,7 @@ type PayloadLekcije = {
     aktivan: boolean;
     tip?: 'ILMIHAL';
   }>;
+  SKOLA_HIFZA?: string[] | null;
 };
 
 type CreateNastavniPlanPayload = {
@@ -36,6 +37,49 @@ export class NastavniPlanService {
     const { nastavniPlan, razredi, lekcije, id } = payload;
 
     return this.prisma.$transaction(async (tx) => {
+      // Pronađi razred "Škola Hifza" i automatski ga dodaj ako nije već u listi
+      const skolaHifzaRazred = await tx.razred.findFirst({
+        where: {
+          ilmihal: Ilmihal.SKOLA_HIFZA,
+        },
+      });
+
+      let finalRazredi = [...razredi];
+      let finalLekcije = { ...lekcije };
+
+      // Ako postoji razred "Škola Hifza", automatski ga dodaj ako nije već u listi
+      if (skolaHifzaRazred) {
+        const razredJeUListi = finalRazredi.includes(skolaHifzaRazred.id);
+        
+        if (!razredJeUListi) {
+          finalRazredi.push(skolaHifzaRazred.id);
+        }
+
+        // Pronađi sve lekcije tipa SKOLA_HIFZA
+        const skolaHifzaLekcije = await tx.lekcija.findMany({
+          where: {
+            tip: TipLekcije.SKOLA_HIFZA,
+            aktivan: true,
+          },
+          orderBy: {
+            redoslijed: 'asc',
+          },
+        });
+
+        // Automatski dodaj lekcije škole hifza ako već nisu dodate u payload-u
+        if (skolaHifzaLekcije.length > 0) {
+          const skolaHifzaLekcijeIds = skolaHifzaLekcije.map((l) => l.id);
+          const existingLekcije = finalLekcije[skolaHifzaRazred.id] || {};
+          
+          // Ako korisnik već nije dodao SKOLA_HIFZA lekcije, automatski ih dodaj
+          if (!existingLekcije.SKOLA_HIFZA || existingLekcije.SKOLA_HIFZA.length === 0) {
+            finalLekcije[skolaHifzaRazred.id] = {
+              ...existingLekcije,
+              SKOLA_HIFZA: skolaHifzaLekcijeIds,
+            };
+          }
+        }
+      }
       let planId = id;
 
       if (planId) {
@@ -75,7 +119,7 @@ export class NastavniPlanService {
         planId = plan.id;
       }
 
-      for (const razredId of razredi) {
+      for (const razredId of finalRazredi) {
         const npRazred = await tx.nastavniPlanRazred.create({
           data: {
             nastavniPlanId: planId,
@@ -83,13 +127,13 @@ export class NastavniPlanService {
           },
         });
 
-        const lekcijeForRazred = lekcije?.[razredId];
+        const lekcijeForRazred = finalLekcije?.[razredId];
         if (!lekcijeForRazred) continue;
 
-        const { SUFARA, KURAN, ILMIHAL } = lekcijeForRazred;
+        const { SUFARA, KURAN, ILMIHAL, SKOLA_HIFZA } = lekcijeForRazred;
 
-        // Poveži postojeće lekcije (KURAN/SUFARA) sa nastavnim planom
-        const existingIds = [...(SUFARA ?? []), ...(KURAN ?? [])];
+        // Poveži postojeće lekcije (KURAN/SUFARA/SKOLA_HIFZA) sa nastavnim planom
+        const existingIds = [...(SUFARA ?? []), ...(KURAN ?? []), ...(SKOLA_HIFZA ?? [])];
         for (const lekcijaId of existingIds) {
           // Veza na razred (RazredLekcija) – osiguraj da je lekcija povezana sa ovim razredom
           await tx.razredLekcija.upsert({
@@ -233,6 +277,7 @@ export class NastavniPlanService {
     for (const npR of plan.razredi) {
       const sufaraIds: string[] = [];
       const kuranIds: string[] = [];
+      const skolaHifzaIds: string[] = [];
       const ilmihalLekcije: Array<PayloadLekcije['ILMIHAL'][number]> = [];
 
       for (const rl of npR.lekcije) {
@@ -241,6 +286,8 @@ export class NastavniPlanService {
           sufaraIds.push(l.id);
         } else if (l.tip === TipLekcije.KURAN) {
           kuranIds.push(l.id);
+        } else if (l.tip === TipLekcije.SKOLA_HIFZA) {
+          skolaHifzaIds.push(l.id);
         } else if (l.tip === TipLekcije.ILMIHAL) {
           ilmihalLekcije.push({
             id: l.id,
@@ -258,6 +305,7 @@ export class NastavniPlanService {
         SUFARA: sufaraIds.length > 0 ? sufaraIds : null,
         KURAN: kuranIds.length > 0 ? kuranIds : null,
         ILMIHAL: ilmihalLekcije,
+        SKOLA_HIFZA: skolaHifzaIds.length > 0 ? skolaHifzaIds : null,
       };
     }
 

@@ -23,5 +23,7 @@ export interface RasporedItem {
   imaUnosCasa?: boolean;
   // ID časa za današnji datum (ako postoji) – olakšava dohvat detalja časa iz kalendara
   trenutniCasId?: string | null;
+  // Tip razreda za identifikaciju (npr. SKOLA_HIFZA)
+  tip?: 'SKOLA_HIFZA';
 }
 

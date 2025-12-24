@@ -14,13 +14,15 @@ export class UcenikController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('razredNaziv') razredNaziv?: string,
+    @Query('all') all?: string,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
+    const allUcenici = all === 'true';
     
-    this.logger.log(`Fetching ucenici - page: ${pageNum}, limit: ${limitNum}, razredNaziv: ${razredNaziv}`);
+    this.logger.log(`Fetching ucenici - page: ${pageNum}, limit: ${limitNum}, razredNaziv: ${razredNaziv}, all: ${allUcenici}`);
     
-    return this.ucenikService.findAll(pageNum, limitNum, razredNaziv);
+    return this.ucenikService.findAll(pageNum, limitNum, razredNaziv, allUcenici);
   }
 
   @Get('razredi')

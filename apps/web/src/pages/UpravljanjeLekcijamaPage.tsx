@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 
-type TipLekcije = 'KURAN' | 'SUFARA';
+type TipLekcije = 'KURAN' | 'SUFARA' | 'SKOLA_HIFZA';
 
 type Lekcija = {
   id: string;
@@ -11,6 +11,7 @@ type Lekcija = {
   redoslijed: number;
   aktivan: boolean;
   tip: TipLekcije;
+  brojAjeta?: number;
 };
 
 const initialKuran: Lekcija[] = Array.from({ length: 10 }, (_, i) => ({
@@ -39,6 +40,7 @@ export default function UpravljanjeLekcijamaPage() {
   const [lekcije, setLekcije] = useState<Record<TipLekcije, Lekcija[]>>({
     KURAN: [],
     SUFARA: [],
+    SKOLA_HIFZA: [],
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -59,6 +61,7 @@ export default function UpravljanjeLekcijamaPage() {
     redoslijed: 0,
     aktivan: true,
     tip: 'KURAN',
+    brojAjeta: undefined,
   });
 
   const resetForm = (tip: TipLekcije) => {
@@ -69,6 +72,7 @@ export default function UpravljanjeLekcijamaPage() {
       redoslijed: getNextRedoslijed(tip),
       aktivan: true,
       tip,
+      brojAjeta: undefined,
     });
     setSelectedId(null);
   };
@@ -77,13 +81,15 @@ export default function UpravljanjeLekcijamaPage() {
     setLoading(true);
     setError(null);
     try {
-      const [kuranRes, sufaraRes] = await Promise.all([
+      const [kuranRes, sufaraRes, skolaHifzaRes] = await Promise.all([
         axios.get<Lekcija[]>(`${API_URL}/lekcije`, { params: { tip: 'KURAN' }, timeout: 8000 }),
         axios.get<Lekcija[]>(`${API_URL}/lekcije`, { params: { tip: 'SUFARA' }, timeout: 8000 }),
+        axios.get<Lekcija[]>(`${API_URL}/lekcije`, { params: { tip: 'SKOLA_HIFZA' }, timeout: 8000 }),
       ]);
       setLekcije({
         KURAN: (kuranRes.data ?? []).sort((a, b) => a.redoslijed - b.redoslijed),
         SUFARA: (sufaraRes.data ?? []).sort((a, b) => a.redoslijed - b.redoslijed),
+        SKOLA_HIFZA: (skolaHifzaRes.data ?? []).sort((a, b) => a.redoslijed - b.redoslijed),
       });
     } catch (err) {
       console.warn('Fetch lekcija nije uspio', err);
@@ -108,12 +114,23 @@ export default function UpravljanjeLekcijamaPage() {
       redoslijed: lesson.redoslijed,
       aktivan: lesson.aktivan,
       tip: lesson.tip,
+      brojAjeta: lesson.brojAjeta,
     });
   };
 
   const handleSave = () => {
     const nextOrder = selectedId ? form.redoslijed : getNextRedoslijed(activeTab);
-    const payload = { ...form, tip: activeTab, redoslijed: nextOrder };
+    const payload: any = { ...form, tip: activeTab, redoslijed: nextOrder };
+    // Za SKOLA_HIFZA, ukloni opis ako postoji brojAjeta, ili ukloni brojAjeta ako nije SKOLA_HIFZA
+    if (activeTab === 'SKOLA_HIFZA') {
+      // Za SKOLA_HIFZA, šaljemo brojAjeta
+      if (!payload.brojAjeta) {
+        payload.brojAjeta = null;
+      }
+    } else {
+      // Za ostale tipove, ne šaljemo brojAjeta
+      delete payload.brojAjeta;
+    }
     setSaving(true);
     setError(null);
     const request = selectedId
@@ -224,14 +241,14 @@ export default function UpravljanjeLekcijamaPage() {
       {toastNode}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Lekcije (Kuran & Sufara)</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Lekcije</h1>
           <p className="text-sm text-gray-600 mt-1">Upravljajte fiksnim lekcijama koje važe za sve razrede.</p>
         </div>
       </div>
 
       <div className="bg-white rounded-lg shadow p-4 border border-gray-100 mb-4">
         <div className="flex items-center gap-2 border-b border-gray-200 pb-1">
-          {(['KURAN', 'SUFARA'] as TipLekcije[]).map((tab) => (
+          {(['KURAN', 'SUFARA', 'SKOLA_HIFZA'] as TipLekcije[]).map((tab) => (
             <button
               key={tab}
               onClick={() => {
@@ -244,7 +261,7 @@ export default function UpravljanjeLekcijamaPage() {
                   : 'text-gray-600 border-transparent hover:text-gray-800 hover:border-gray-300'
               }`}
             >
-              {tab}
+              {tab === 'SKOLA_HIFZA' ? 'SKOLA HIFZA' : tab}
             </button>
           ))}
         </div>
@@ -261,7 +278,12 @@ export default function UpravljanjeLekcijamaPage() {
         <div className="lg:col-span-2 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">
-              {activeTab === 'KURAN' ? 'Kuran lekcije' : 'Sufara lekcije'} ({lessonsForTab.length})
+              {activeTab === 'KURAN'
+                ? 'Kuran lekcije'
+                : activeTab === 'SUFARA'
+                  ? 'Sufara lekcije'
+                  : 'Škola Hifza lekcije'}{' '}
+              ({lessonsForTab.length})
             </h2>
           </div>
 
@@ -276,56 +298,29 @@ export default function UpravljanjeLekcijamaPage() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2">
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold border ${tezinaColors[lekcija.tezina]}`}
-                    >
-                      {lekcija.tezina}
-                    </span>
+                    {activeTab === 'SKOLA_HIFZA' ? (
+                      <span className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold border bg-blue-100 text-blue-800 border-blue-200">
+                        {lekcija.redoslijed + 1}
+                      </span>
+                    ) : (
+                      <span
+                        className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold border ${tezinaColors[lekcija.tezina]}`}
+                      >
+                        {lekcija.tezina}
+                      </span>
+                    )}
                     <div>
                       <div className="text-sm font-semibold text-gray-900">{lekcija.naslov}</div>
-                      <p className="text-xs text-gray-600 mt-1 line-clamp-2">{lekcija.opis}</p>
+                      <p className="text-xs text-gray-600 mt-1 line-clamp-2">
+                        {activeTab === 'SKOLA_HIFZA' && lekcija.brojAjeta
+                          ? `${lekcija.brojAjeta} ajeta`
+                          : activeTab === 'SKOLA_HIFZA'
+                            ? lekcija.opis
+                            : lekcija.brojAjeta
+                              ? `${lekcija.brojAjeta} ajeta`
+                              : lekcija.opis}
+                      </p>
                     </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <div className="flex items-center gap-2 text-[11px] text-gray-600">
-                      <span>{lekcija.aktivan ? 'Aktivna' : 'Neaktivna'}</span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleActive(lekcija.id);
-                        }}
-                        className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${
-                          lekcija.aktivan ? 'bg-emerald-500' : 'bg-gray-300'
-                        }`}
-                        role="switch"
-                        aria-checked={lekcija.aktivan}
-                        title={lekcija.aktivan ? 'Deaktiviraj' : 'Aktiviraj'}
-                      >
-                        <span
-                          className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
-                            lekcija.aktivan ? 'translate-x-4' : 'translate-x-0.5'
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs text-gray-500 mt-3">
-                  <div />
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(lekcija.id);
-                      }}
-                      className="p-2 rounded-full border border-red-100 text-red-600 hover:bg-red-50"
-                      title="Obriši"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5-4h4a1 1 0 011 1v2H9V4a1 1 0 011-1z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 11v6m4-6v6" />
-                      </svg>
-                    </button>
                   </div>
                 </div>
               </div>
@@ -344,10 +339,10 @@ export default function UpravljanjeLekcijamaPage() {
               <h3 className="text-base font-semibold text-gray-900">
                 {selectedId ? 'Uredi lekciju' : 'Nova lekcija'}
               </h3>
-              <p className="text-xs text-gray-500">Za sve razrede ({activeTab})</p>
+              <p className="text-xs text-gray-500">Za sve razrede ({activeTab === 'SKOLA_HIFZA' ? 'SKOLA HIFZA' : activeTab})</p>
             </div>
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-              {activeTab}
+              {activeTab === 'SKOLA_HIFZA' ? 'SKOLA HIFZA' : activeTab}
             </span>
           </div>
 
@@ -361,54 +356,72 @@ export default function UpravljanjeLekcijamaPage() {
                 placeholder="Unesite naslov lekcije"
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Opis</label>
-              <textarea
-                value={form.opis}
-                onChange={(e) => setForm((prev) => ({ ...prev, opis: e.target.value }))}
-                className="w-full rounded-lg border border-gray-200 bg-gray-50 text-sm px-3 py-2 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition"
-                rows={3}
-                placeholder="Kratak opis lekcije"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Težina</label>
-              <div className="flex items-center gap-2">
-                {[1, 2, 3].map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setForm((prev) => ({ ...prev, tezina: t as 1 | 2 | 3 }))}
-                    className={`px-3 py-2 rounded-lg border text-sm font-semibold ${
-                      form.tezina === t
-                        ? 'bg-amber-50 border-amber-200 text-amber-700'
-                        : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-gray-700">
-                <span>Status</span>
-              </div>
-              <button
-                onClick={() => setForm((prev) => ({ ...prev, aktivan: !prev.aktivan }))}
-                className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${
-                  form.aktivan ? 'bg-emerald-500' : 'bg-gray-300'
-                }`}
-                role="switch"
-                aria-checked={form.aktivan}
-                title={form.aktivan ? 'Aktivna' : 'Neaktivna'}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
-                    form.aktivan ? 'translate-x-4' : 'translate-x-0.5'
-                  }`}
+            {activeTab === 'SKOLA_HIFZA' ? (
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Broj ajeta</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={form.brojAjeta ?? ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, brojAjeta: e.target.value ? parseInt(e.target.value, 10) : undefined }))}
+                  className="w-full rounded-lg border border-gray-200 bg-gray-50 text-sm px-3 py-2 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition"
+                  placeholder="Unesite broj ajeta"
                 />
-              </button>
-            </div>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Opis</label>
+                <textarea
+                  value={form.opis}
+                  onChange={(e) => setForm((prev) => ({ ...prev, opis: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-200 bg-gray-50 text-sm px-3 py-2 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition"
+                  rows={3}
+                  placeholder="Kratak opis lekcije"
+                />
+              </div>
+            )}
+            {activeTab !== 'SKOLA_HIFZA' && (
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Težina</label>
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3].map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setForm((prev) => ({ ...prev, tezina: t as 1 | 2 | 3 }))}
+                      className={`px-3 py-2 rounded-lg border text-sm font-semibold ${
+                        form.tezina === t
+                          ? 'bg-amber-50 border-amber-200 text-amber-700'
+                          : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {activeTab !== 'SKOLA_HIFZA' && (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm text-gray-700">
+                  <span>Status</span>
+                </div>
+                <button
+                  onClick={() => setForm((prev) => ({ ...prev, aktivan: !prev.aktivan }))}
+                  className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${
+                    form.aktivan ? 'bg-emerald-500' : 'bg-gray-300'
+                  }`}
+                  role="switch"
+                  aria-checked={form.aktivan}
+                  title={form.aktivan ? 'Aktivna' : 'Neaktivna'}
+                >
+                  <span
+                    className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+                      form.aktivan ? 'translate-x-4' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between pt-2">
@@ -422,9 +435,10 @@ export default function UpravljanjeLekcijamaPage() {
             </button>
             <button
               onClick={handleSave}
-              className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
+              disabled={saving}
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {selectedId ? 'Spremi izmjene' : 'Dodaj lekciju'}
+              {saving ? 'Spremanje...' : selectedId ? 'Spremi izmjene' : 'Dodaj lekciju'}
             </button>
           </div>
         </div>

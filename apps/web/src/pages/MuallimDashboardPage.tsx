@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import CasEntryDrawer from '../components/CasEntryDrawer';
+import SkolaHifzaCasDrawer from '../components/SkolaHifzaCasDrawer';
 import WeekendDatePicker from '../components/WeekendDatePicker';
 import { RasporedItem } from '../types/raspored';
 
@@ -393,8 +394,9 @@ export default function MuallimDashboardPage() {
         const info = getIlmihalInfo(item.grupa.razred.ilmihal);
         const startMin = timeToMinutes(item.slot);
         const endMin = startMin + item.trajanje;
+        const isSkolaHifza = item.grupa.razred.ilmihal === 'SKOLA_HIFZA' || item.grupa.razred.ilmihal === 'ŠKOLA HIFZA';
         const grupaLabel = item.grupa.naziv === 'A' ? 'Grupa 1' : item.grupa.naziv === 'B' ? 'Grupa 2' : `Grupa ${item.grupa.naziv}`;
-        const label = `${item.grupa.razred.name} • ${grupaLabel}`;
+        const label = isSkolaHifza ? 'Škola hifza' : `${item.grupa.razred.name} • ${grupaLabel}`;
         
         slots.push({
           start: item.slot,
@@ -507,11 +509,24 @@ export default function MuallimDashboardPage() {
   };
 
   const getIlmihalInfo = (ilmihal: string) => {
-    // Prisma enum vraća ILMIHAL_I, ILMIHAL_II, ILMIHAL_III (sa underscore-om)
+    // Prisma enum vraća ILMIHAL_I, ILMIHAL_II, ILMIHAL_III, SKOLA_HIFZA (sa underscore-om)
     // Provjeravamo i sa underscore-om i bez (za slučaj da API vraća mapiranu vrijednost)
     
     // Normalizujemo za poređenje
     const normalized = ilmihal.trim().toUpperCase();
+    
+    // Provjeri SKOLA_HIFZA prvo
+    if (normalized === 'SKOLA_HIFZA' || normalized === 'ŠKOLA HIFZA' || normalized.includes('SKOLA_HIFZA') || normalized.includes('ŠKOLA HIFZA')) {
+      return {
+        label: 'Škola hifza',
+        color: 'bg-purple-50 text-purple-900 border-purple-200',
+        bg: 'bg-purple-50',
+        text: 'text-purple-900',
+        border: 'border-purple-200',
+        iconBg: 'bg-purple-100',
+        iconText: 'text-purple-700',
+      };
+    }
     
     if (normalized === 'ILMIHAL_I' || normalized === 'ILMIHAL I' || normalized.includes('ILMIHAL I')) {
       return {
@@ -580,18 +595,34 @@ export default function MuallimDashboardPage() {
   };
 
   // Helper funkcija za tamniju boju lijevog bordera na osnovu statusa slota
-  const getLeftBorderClass = (isActive: boolean, isPastSlot: boolean, isCompletedSlot: boolean) => {
+  const getLeftBorderClass = (
+    isActive: boolean,
+    isPastSlot: boolean,
+    isCompletedSlot: boolean,
+    isSkolaHifza: boolean = false,
+  ) => {
+    // OBICNI CASOVI:
+    // - nije nastupio  -> svjetlo plava
+    // - nastupio, nema cas -> žuta
+    // - nastupio, ima cas  -> jaka plava
+    //
+    // HIFZ CASOVI:
+    // - nije nastupio  -> svjetlo ljubičasta
+    // - nastupio, nema cas -> žuta
+    // - nastupio, ima cas  -> jaka ljubičasta
     if (isActive) {
-      return 'border-l-4 border-l-blue-800';
+      return isSkolaHifza ? 'border-l-4 border-l-purple-800' : 'border-l-4 border-l-blue-800';
     }
-    if (isPastSlot && !isCompletedSlot) {
+    if (isPastSlot) {
+      if (isCompletedSlot) {
+        // Prošli sa časom – jaka plava / ljubičasta
+        return isSkolaHifza ? 'border-l-4 border-l-purple-700' : 'border-l-4 border-l-blue-700';
+      }
+      // Prošli bez časa – žuti border
       return 'border-l-4 border-l-amber-400';
     }
-    if (isPastSlot && isCompletedSlot) {
-      return 'border-l-4 border-l-emerald-500';
-    }
-    // Budući casovi
-    return 'border-l-4 border-l-blue-400';
+    // Budući casovi – svjetliji plavi ili ljubičasti border
+    return isSkolaHifza ? 'border-l-4 border-l-purple-400' : 'border-l-4 border-l-blue-400';
   };
 
   const isTodayWeekend = () => {
@@ -1474,33 +1505,43 @@ export default function MuallimDashboardPage() {
                       const casKey = `${slot.item.id}-${dateISO}`;
                       const isCompletedSlot = casExistsMap.get(casKey) ?? false;
 
+                      // Provjeri da li je SKOLA_HIFZA razred
+                      const isSkolaHifza = slot.item.grupa.razred.ilmihal === 'SKOLA_HIFZA' || slot.item.grupa.razred.ilmihal === 'ŠKOLA HIFZA';
+
                       // Boje na osnovu statusa casa
                       const getSlotStyle = () => {
+                        const strongBlue = isOverlap
+                          ? 'bg-blue-600 border-[0.5px] border-blue-500/40 text-white shadow-lg ring-1 ring-blue-300/60'
+                          : 'bg-blue-600 border-[0.5px] border-blue-500/40 text-white shadow-lg';
+                        const strongPurple = isOverlap
+                          ? 'bg-purple-600 border-[0.5px] border-purple-500/40 text-white shadow-lg ring-1 ring-purple-300/60'
+                          : 'bg-purple-600 border-[0.5px] border-purple-500/40 text-white shadow-lg';
+                        const lightBlue = isOverlap
+                          ? 'bg-blue-50 border-[0.5px] border-blue-300/50 text-blue-900 shadow-sm ring-0.5 ring-blue-300/50'
+                          : 'bg-blue-50 border-[0.5px] border-blue-200/50 text-blue-900/90';
+                        const lightPurple = isOverlap
+                          ? 'bg-purple-50 border-[0.5px] border-purple-300/50 text-purple-900 shadow-sm ring-0.5 ring-purple-300/50'
+                          : 'bg-purple-50 border-[0.5px] border-purple-200/50 text-purple-900/90';
+                        const yellow = isOverlap
+                          ? 'bg-amber-50 border-[0.5px] border-amber-200/50 text-amber-900 shadow-sm ring-1 ring-amber-300/60'
+                          : 'bg-amber-50 border-[0.5px] border-amber-200/50 text-amber-900';
+
+                        // Aktivni slotovi – tretiramo kao \"nastupio, ima cas\" sa jakom bojom
                         if (isActive) {
-                          // Active slot - darker blue with very thin border
-                          return 'bg-blue-600 border-[0.5px] border-blue-500/30 text-white shadow-lg';
+                          return isSkolaHifza ? strongPurple : strongBlue;
                         }
 
-                        // Prošli casovi bez casa - žuti
-                        if (isPastSlot && !isCompletedSlot) {
-                          return isOverlap
-                            ? 'bg-amber-50 border-[0.5px] border-amber-200/50 text-amber-900 shadow-sm ring-1 ring-amber-300/60'
-                            : 'bg-amber-50 border-[0.5px] border-amber-200/50 text-amber-900';
+                        if (isPastSlot) {
+                          if (isCompletedSlot) {
+                            // Prošli slot sa casom – jaka plava / ljubičasta
+                            return isSkolaHifza ? strongPurple : strongBlue;
+                          }
+                          // Prošli bez časa – žuti
+                          return yellow;
                         }
 
-                        // Prošli casovi sa casom - zeleni
-                        if (isPastSlot && isCompletedSlot) {
-                          return isOverlap
-                            ? 'bg-emerald-50 border-[0.5px] border-emerald-200/50 text-emerald-900 shadow-sm ring-1 ring-emerald-300/60'
-                            : 'bg-emerald-50 border-[0.5px] border-emerald-200/50 text-emerald-900';
-                        }
-
-                        // Budući casovi - plavi
-                        const base =
-                          isOverlap
-                            ? 'bg-blue-100 border-[0.5px] border-blue-300/50 text-blue-900 shadow-sm ring-0.5 ring-blue-300/50'
-                            : 'bg-blue-50 border-[0.5px] border-blue-200/50 text-blue-900/90';
-
+                        // Budući casovi (nije nastupio) – svjetlo plava / ljubičasta
+                        const base = isSkolaHifza ? lightPurple : lightBlue;
                         return isSlotOnSelectedDay ? base : `${base} opacity-55`;
                       };
 
@@ -1518,7 +1559,7 @@ export default function MuallimDashboardPage() {
                             // Spremi datum za drawer
                             setSelectedSlotDate(slotDate);
                           }}
-                          className={`absolute rounded-md ${getSlotStyle()} ${getLeftBorderClass(isActive, isPastSlot, isCompletedSlot)} px-3 py-2 text-[14px] font-medium text-left ${
+                          className={`absolute rounded-md ${getSlotStyle()} ${getLeftBorderClass(isActive, isPastSlot, isCompletedSlot, isSkolaHifza)} px-3 py-2 text-[14px] font-medium text-left ${
                             canOpenDrawerForSlot 
                               ? 'cursor-pointer hover:shadow-md transition-shadow' 
                               : 'cursor-not-allowed opacity-60'
@@ -1772,30 +1813,62 @@ export default function MuallimDashboardPage() {
         </div>
       </div>
 
-      <CasEntryDrawer
-        open={showCasDrawer}
-        slot={selectedSlotForDrawer}
-        slotDate={selectedSlotDate}
-        onClose={() => {
-          setShowCasDrawer(false);
-          setSelectedSlotForDrawer(null);
-          setSelectedSlotDate(null);
-        }}
-        onSave={async () => {
-          // Nakon spremanja, osvježi mapu casova
-          if (selectedSlotForDrawer && selectedSlotDate) {
-            const dateISO = selectedSlotDate.toISOString().split('T')[0];
-            const key = `${selectedSlotForDrawer.id}-${dateISO}`;
-            setCasExistsMap((prev) => {
-              const newMap = new Map(prev);
-              newMap.set(key, true);
-              return newMap;
-            });
-          }
-          // Također osvježi dashboard podatke
-          await fetchDashboardData();
-        }}
-      />
+      {(() => {
+        const ilmihal = selectedSlotForDrawer?.grupa?.razred?.ilmihal;
+        const isSkolaHifza = ilmihal === 'SKOLA_HIFZA' || ilmihal === 'ŠKOLA HIFZA';
+        console.log('🔍 [DRAWER] Checking drawer type:', { ilmihal, isSkolaHifza, slot: selectedSlotForDrawer });
+        return isSkolaHifza;
+      })() ? (
+        <SkolaHifzaCasDrawer
+          open={showCasDrawer}
+          slot={selectedSlotForDrawer}
+          slotDate={selectedSlotDate}
+          onClose={() => {
+            setShowCasDrawer(false);
+            setSelectedSlotForDrawer(null);
+            setSelectedSlotDate(null);
+          }}
+          onSave={async () => {
+            // Nakon spremanja, osvježi mapu casova
+            if (selectedSlotForDrawer && selectedSlotDate) {
+              const dateISO = selectedSlotDate.toISOString().split('T')[0];
+              const key = `${selectedSlotForDrawer.id}-${dateISO}`;
+              setCasExistsMap((prev) => {
+                const newMap = new Map(prev);
+                newMap.set(key, true);
+                return newMap;
+              });
+            }
+            // Također osvježi dashboard podatke
+            await fetchDashboardData();
+          }}
+        />
+      ) : (
+        <CasEntryDrawer
+          open={showCasDrawer}
+          slot={selectedSlotForDrawer}
+          slotDate={selectedSlotDate}
+          onClose={() => {
+            setShowCasDrawer(false);
+            setSelectedSlotForDrawer(null);
+            setSelectedSlotDate(null);
+          }}
+          onSave={async () => {
+            // Nakon spremanja, osvježi mapu casova
+            if (selectedSlotForDrawer && selectedSlotDate) {
+              const dateISO = selectedSlotDate.toISOString().split('T')[0];
+              const key = `${selectedSlotForDrawer.id}-${dateISO}`;
+              setCasExistsMap((prev) => {
+                const newMap = new Map(prev);
+                newMap.set(key, true);
+                return newMap;
+              });
+            }
+            // Također osvježi dashboard podatke
+            await fetchDashboardData();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import CasoviDateFilter from '../components/CasoviDateFilter';
 import CasEntryDrawer from '../components/CasEntryDrawer';
+import SkolaHifzaCasDrawer from '../components/SkolaHifzaCasDrawer';
 import { RasporedItem } from '../types/raspored';
 
 const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
@@ -80,6 +81,9 @@ export default function CasoviPage() {
   const getIlmihalAccentClass = (ilmihal: string) => {
     const normalized = (ilmihal || '').trim().toUpperCase();
 
+    if (normalized === 'SKOLA_HIFZA' || normalized === 'ŠKOLA HIFZA' || normalized.includes('SKOLA_HIFZA') || normalized.includes('ŠKOLA HIFZA')) {
+      return 'bg-purple-500';
+    }
     if (normalized === 'ILMIHAL_I' || normalized === 'ILMIHAL I' || normalized.includes('ILMIHAL I')) {
       return 'bg-emerald-500';
     }
@@ -91,6 +95,15 @@ export default function CasoviPage() {
     }
 
     return 'bg-blue-500';
+  };
+
+  // Helper: label za razred (za SKOLA_HIFZA vraća "Škola hifza")
+  const getRazredLabel = (razred: { name: string; ilmihal: string }, grupaLabel: string): string => {
+    const isSkolaHifza = razred.ilmihal === 'SKOLA_HIFZA' || razred.ilmihal === 'ŠKOLA HIFZA';
+    if (isSkolaHifza) {
+      return 'Škola hifza';
+    }
+    return `${razred.name} ${grupaLabel}`;
   };
 
   // Timeline constants (kao u MuallimDashboardPage)
@@ -174,18 +187,45 @@ export default function CasoviPage() {
   };
 
   // Generiši osnovnu boju prema statusu slota:
-  // - aktivni slotovi (trenutno se odvijaju): potpuno plavi
-  // - budući slotovi: plavi
-  // - prošli slotovi sa časom: zeleni
-  // - prošli slotovi bez časa: žuti
+  // OBICNI CASOVI:
+  // - nije nastupio  -> svjetlo plava
+  // - nastupio, nema cas -> žuta
+  // - nastupio, ima cas  -> jaka plava
+  //
+  // HIFZ CASOVI:
+  // - nije nastupio  -> svjetlo ljubičasta
+  // - nastupio, nema cas -> žuta
+  // - nastupio, ima cas  -> jaka ljubičasta
   const getSlotStatusClass = (slotDate: Date, cas: Cas, variant: 'chip' | 'block' = 'block') => {
+    const isSkolaHifza =
+      cas.raspored.grupa.razred.ilmihal === 'SKOLA_HIFZA' ||
+      cas.raspored.grupa.razred.ilmihal === 'ŠKOLA HIFZA';
     const isActive = isSlotActive(cas, slotDate);
     
-    if (isActive) {
-      // Aktivni slotovi – potpuno plavi
-      return variant === 'chip'
+    const strongBlue =
+      variant === 'chip'
         ? 'bg-blue-600 border-[0.5px] border-blue-500/30 text-white shadow-lg'
         : 'bg-blue-600 border-[0.5px] border-blue-500/30 text-white shadow-lg';
+    const strongPurple =
+      variant === 'chip'
+        ? 'bg-purple-600 border-[0.5px] border-purple-500/30 text-white shadow-lg'
+        : 'bg-purple-600 border-[0.5px] border-purple-500/30 text-white shadow-lg';
+    const lightBlue =
+      variant === 'chip'
+        ? 'bg-blue-50 border border-blue-200 text-blue-900'
+        : 'bg-blue-50 border border-blue-200 text-blue-900';
+    const lightPurple =
+      variant === 'chip'
+        ? 'bg-purple-50 border border-purple-200 text-purple-900'
+        : 'bg-purple-50 border border-purple-200 text-purple-900';
+    const yellow =
+      variant === 'chip'
+        ? 'bg-amber-50 border border-amber-200 text-amber-900'
+        : 'bg-amber-50 border border-amber-200 text-amber-900';
+
+    // Aktivni slotovi – tretiramo kao \"nastupio, ima cas\" sa jakom bojom
+    if (isActive) {
+      return isSkolaHifza ? strongPurple : strongBlue;
     }
 
     const now = new Date();
@@ -199,30 +239,27 @@ export default function CasoviPage() {
 
     if (isPast) {
       if (cas.imaCas) {
-        // Prošli sa časom – zeleni
-        return variant === 'chip'
-          ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
-          : 'bg-emerald-50 border border-emerald-200 text-emerald-900';
+        // Prošli slotovi sa časom – jaka plava / ljubičasta
+        return isSkolaHifza ? strongPurple : strongBlue;
       }
-      // Prošli bez časa – žuti
-      return variant === 'chip'
-        ? 'bg-amber-50 border border-amber-200 text-amber-900'
-        : 'bg-amber-50 border border-amber-200 text-amber-900';
+      // Prošli bez časa – žuti za sve
+      return yellow;
     }
 
-    // Budući slotovi – plavi
-    return variant === 'chip'
-      ? 'bg-blue-50 border border-blue-200 text-blue-900'
-      : 'bg-blue-50 border border-blue-200 text-blue-900';
+    // Budući slotovi (nije nastupio) – svjetlo plava / ljubičasta
+    return isSkolaHifza ? lightPurple : lightBlue;
   };
 
   // Helper za lijevi border (deblji i jača nijansa)
   const getLeftBorderClass = (slotDate: Date, cas: Cas) => {
+    const isSkolaHifza =
+      cas.raspored.grupa.razred.ilmihal === 'SKOLA_HIFZA' ||
+      cas.raspored.grupa.razred.ilmihal === 'ŠKOLA HIFZA';
     const isActive = isSlotActive(cas, slotDate);
     
     if (isActive) {
-      // Aktivni slotovi – tamniji plavi border
-      return 'border-l-4 border-l-blue-800';
+      // Aktivni slotovi – jaka nijansa (plava / ljubičasta)
+      return isSkolaHifza ? 'border-l-4 border-l-purple-800' : 'border-l-4 border-l-blue-800';
     }
 
     const now = new Date();
@@ -236,15 +273,15 @@ export default function CasoviPage() {
 
     if (isPast) {
       if (cas.imaCas) {
-        // Prošli sa časom – zeleni border
-        return 'border-l-4 border-l-emerald-500';
+        // Prošli sa časom – jaka plava / ljubičasta
+        return isSkolaHifza ? 'border-l-4 border-l-purple-700' : 'border-l-4 border-l-blue-700';
       }
       // Prošli bez časa – žuti border
       return 'border-l-4 border-l-amber-400';
     }
 
-    // Budući slotovi – plavi border
-    return 'border-l-4 border-l-blue-400';
+    // Budući slotovi – svjetliji plavi ili ljubičasti border
+    return isSkolaHifza ? 'border-l-4 border-l-purple-400' : 'border-l-4 border-l-blue-400';
   };
 
 
@@ -738,7 +775,7 @@ export default function CasoviPage() {
                           className={`w-full text-left text-[11px] px-2 py-1.5 rounded-md cursor-pointer transition-all duration-150 ${statusClass} ${getLeftBorderClass(date, cas)} ${
                             cas.imaCas ? 'font-medium hover:shadow-md' : 'font-normal hover:shadow-sm'
                           }`}
-                          title={`${startTime} - ${endTime} • ${cas.raspored.grupa.razred.name} ${grupaLabel}${cas.raspored.lokacija ? ` • ${cas.raspored.lokacija}` : ''}`}
+                          title={`${startTime} - ${endTime} • ${getRazredLabel(cas.raspored.grupa.razred, grupaLabel)}${cas.raspored.lokacija ? ` • ${cas.raspored.lokacija}` : ''}`}
                         >
                           <div className="space-y-1">
                             {/* Početak - Završetak */}
@@ -756,7 +793,7 @@ export default function CasoviPage() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                               </svg>
                               <span className="truncate">
-                                {cas.raspored.grupa.razred.name} {grupaLabel}
+                                {getRazredLabel(cas.raspored.grupa.razred, grupaLabel)}
                               </span>
                             </div>
                             {/* Lokacija */}
@@ -1107,7 +1144,7 @@ export default function CasoviPage() {
                           width: `calc(${widthPct}% - ${margin * 2}px)`,
                           left: `calc(${leftPct}% + ${margin}px)`,
                         }}
-                        title={`${cas.raspored.slot} - ${endTime} • ${cas.raspored.grupa.razred.name} ${grupaLabel}${cas.raspored.lokacija ? ` • ${cas.raspored.lokacija}` : ''}`}
+                        title={`${cas.raspored.slot} - ${endTime} • ${getRazredLabel(cas.raspored.grupa.razred, grupaLabel)}${cas.raspored.lokacija ? ` • ${cas.raspored.lokacija}` : ''}`}
                       >
                         <div className="space-y-1">
                           {/* Početak - Završetak */}
@@ -1125,7 +1162,7 @@ export default function CasoviPage() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                             </svg>
                             <span className={`truncate ${isActive ? 'text-white/90' : ''}`}>
-                              {cas.raspored.grupa.razred.name} {grupaLabel}
+                              {getRazredLabel(cas.raspored.grupa.razred, grupaLabel)}
                             </span>
                           </div>
                           {/* Lokacija */}
@@ -1439,7 +1476,7 @@ export default function CasoviPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                         </svg>
                         <span className={`truncate ${isActive ? 'text-white/90' : ''}`}>
-                          {cas.raspored.grupa.razred.name} {grupaLabel}
+                          {getRazredLabel(cas.raspored.grupa.razred, grupaLabel)}
                         </span>
                       </div>
                       {/* Lokacija */}
@@ -1637,6 +1674,10 @@ export default function CasoviPage() {
               <div className="w-4 h-4 rounded border border-blue-300 bg-blue-50"></div>
               <span className="text-xs text-gray-700">Budući časovi</span>
             </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded border border-purple-300 bg-purple-50"></div>
+              <span className="text-xs text-gray-700">Škola hifza</span>
+            </div>
           </div>
         </div>
 
@@ -1700,7 +1741,7 @@ export default function CasoviPage() {
                   <div className="mb-4">
                     <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Razred</div>
                     <div className="text-base font-semibold text-gray-900">
-                      {selectedCas.raspored.grupa.razred.name}
+                      {getRazredLabel(selectedCas.raspored.grupa.razred, '')}
                     </div>
                   </div>
 
@@ -1725,29 +1766,59 @@ export default function CasoviPage() {
           );
         })()}
 
-        {/* CasEntryDrawer */}
-        <CasEntryDrawer
-          open={showCasDrawer}
-          slot={selectedSlotForDrawer}
-          slotDate={selectedSlotDate}
-          onClose={() => {
-            setShowCasDrawer(false);
-            setSelectedSlotForDrawer(null);
-            setSelectedSlotDate(null);
-          }}
-          onSave={async () => {
-            // Nakon spremanja, osvježi podatke
-            try {
-              const response = await axios.get(`${API_URL}/cas/muallim/range`);
-              if (response.data) {
-                setNastavnaGodina(response.data.nastavnaGodina || null);
-                setCasovi(response.data.casovi || []);
+        {/* CasEntryDrawer ili SkolaHifzaCasDrawer */}
+        {(() => {
+          const ilmihal = selectedSlotForDrawer?.grupa?.razred?.ilmihal;
+          const isSkolaHifza = ilmihal === 'SKOLA_HIFZA' || ilmihal === 'ŠKOLA HIFZA';
+          console.log('🔍 [CASOVI] Checking drawer type:', { ilmihal, isSkolaHifza, slot: selectedSlotForDrawer });
+          return isSkolaHifza;
+        })() ? (
+          <SkolaHifzaCasDrawer
+            open={showCasDrawer}
+            slot={selectedSlotForDrawer}
+            slotDate={selectedSlotDate}
+            onClose={() => {
+              setShowCasDrawer(false);
+              setSelectedSlotForDrawer(null);
+              setSelectedSlotDate(null);
+            }}
+            onSave={async () => {
+              // Nakon spremanja, osvježi podatke
+              try {
+                const response = await axios.get(`${API_URL}/cas/muallim/range`);
+                if (response.data) {
+                  setNastavnaGodina(response.data.nastavnaGodina || null);
+                  setCasovi(response.data.casovi || []);
+                }
+              } catch (err) {
+                console.error('Error refreshing casovi:', err);
               }
-            } catch (err) {
-              console.error('Error refreshing casovi:', err);
-            }
-          }}
-        />
+            }}
+          />
+        ) : (
+          <CasEntryDrawer
+            open={showCasDrawer}
+            slot={selectedSlotForDrawer}
+            slotDate={selectedSlotDate}
+            onClose={() => {
+              setShowCasDrawer(false);
+              setSelectedSlotForDrawer(null);
+              setSelectedSlotDate(null);
+            }}
+            onSave={async () => {
+              // Nakon spremanja, osvježi podatke
+              try {
+                const response = await axios.get(`${API_URL}/cas/muallim/range`);
+                if (response.data) {
+                  setNastavnaGodina(response.data.nastavnaGodina || null);
+                  setCasovi(response.data.casovi || []);
+                }
+              } catch (err) {
+                console.error('Error refreshing casovi:', err);
+              }
+            }}
+          />
+        )}
       </div>
     </div>
   );

@@ -20,7 +20,7 @@ type Muallim = {
 type ApiRazred = {
   id: string;
   name: string;
-  ilmihal: 'ILMIHAL_I' | 'ILMIHAL_II' | 'ILMIHAL_III';
+  ilmihal: 'ILMIHAL_I' | 'ILMIHAL_II' | 'ILMIHAL_III' | 'SKOLA_HIFZA';
   status: boolean;
 };
 
@@ -34,10 +34,15 @@ const TIMELINE_END_HOUR = 16; // 16:00
 const TIMELINE_HEIGHT = 480; // px
 const SLOT_DURATION_OPTIONS = [30, 45, 60, 90, 120]; // minutes
 
-const labelGrupa = (razred: number) => (razred === 0 ? 'Predškolci' : `${razred}. razred`);
+const labelGrupa = (razred: number) => {
+  if (razred === 0) return 'Predškolci';
+  if (razred === 999) return 'Škola Hifza'; // Special number for SKOLA_HIFZA
+  return `${razred}. razred`;
+};
 
 function razredInfo(razred: number, ilmihal?: ApiRazred['ilmihal']) {
   if (razred === 0) return { label: 'PREDSKOLCI', color: 'bg-teal-100 text-teal-800 border-teal-200' };
+  if (razred === 999 || ilmihal === 'SKOLA_HIFZA') return { label: 'ŠKOLA HIFZA', color: 'bg-purple-100 text-purple-800 border-purple-200' };
 
   if (ilmihal === 'ILMIHAL_I') return { label: 'ILMIHAL I', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
   if (ilmihal === 'ILMIHAL_II') return { label: 'ILMIHAL II', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' };
@@ -236,13 +241,37 @@ export default function SetupNastavnaGodinaPage() {
 
   useEffect(() => {
     const fetchUcenici = async () => {
+      console.log('🔄 [UCENICI] Počinje učitavanje učenika...');
       try {
-        const response = await axios.get<Ucenik[]>(`${API_URL}/ucenici`, {
+        // Učitaj sve učenike (bez paginacije) - koristi all=true da dobijemo sve učenike bez obzira na aktivnu nastavnu godinu
+        const response = await axios.get<{ data: Ucenik[]; total: number; page: number; limit: number; totalPages: number }>(`${API_URL}/ucenici`, {
+          params: { page: 1, limit: 10000, all: 'true' }, // Veliki limit da dobijemo sve, all=true za sve učenike
           timeout: 5000, // 5 sekundi timeout
         });
-        setUcenici(response.data ?? []);
+        console.log('✅ [UCENICI] API Response raw:', response.data);
+        
+        // API vraća objekt sa { data: [...], total, page, limit, totalPages }
+        const responseData = response.data as { data?: Ucenik[]; total?: number; page?: number; limit?: number; totalPages?: number } | Ucenik[];
+        const uceniciData = Array.isArray(response.data) 
+          ? response.data 
+          : (responseData && typeof responseData === 'object' && 'data' in responseData && Array.isArray(responseData.data) ? responseData.data : []);
+        console.log('✅ [UCENICI] API Response processed:', {
+          status: response.status,
+          isArray: Array.isArray(response.data),
+          hasDataProperty: !!(responseData && typeof responseData === 'object' && 'data' in responseData),
+          dataLength: uceniciData.length,
+          total: Array.isArray(responseData) ? undefined : responseData?.total,
+          firstFew: Array.isArray(uceniciData) ? uceniciData.slice(0, 3).map(u => ({ id: u.id, ime: u.ime, prezime: u.prezime })) : []
+        });
+        console.log('✅ [UCENICI] Učitano učenika:', uceniciData.length);
+        setUcenici(uceniciData);
+        console.log('✅ [UCENICI] State postavljen, ucenici.length:', uceniciData.length);
       } catch (error) {
-        console.warn('API nije dostupan za učenike:', error);
+        console.error('❌ [UCENICI] API nije dostupan za učenike:', error);
+        console.error('❌ [UCENICI] Error details:', {
+          message: error instanceof Error ? error.message : String(error),
+          response: axios.isAxiosError(error) ? error.response?.data : undefined
+        });
         setUcenici([]);
       }
     };
@@ -428,6 +457,10 @@ export default function SetupNastavnaGodinaPage() {
       (razredi ?? [])
         .filter((r) => r.status !== false)
         .map((r) => {
+          // Special handling for SKOLA_HIFZA razred
+          if (r.ilmihal === 'SKOLA_HIFZA') {
+            return { ...r, nameNum: 999 };
+          }
           const match = r.name.match(/\d+/);
           const nameNum = match ? Number(match[0]) : NaN;
           return { ...r, nameNum };
@@ -496,6 +529,42 @@ export default function SetupNastavnaGodinaPage() {
     setSaveError(null);
     setExpandedRazred(null);
     setHoverDrop(null);
+    setSearch(''); // Resetuj search kada se učitava nova godina
+    
+    // Osiguraj da su učenici učitani prije nego što se učitaju detalji godine
+    console.log('🔄 [LOAD_GODINA] Provjera učenika prije učitavanja godine:', {
+      uceniciLength: ucenici.length,
+      godinaId: godinaId
+    });
+    
+    if (ucenici.length === 0) {
+      console.log('⚠️ [LOAD_GODINA] Učenici nisu učitani, učitavam...');
+      try {
+        // Učitaj sve učenike (bez paginacije) - koristi all=true da dobijemo sve učenike bez obzira na aktivnu nastavnu godinu
+        const response = await axios.get<{ data: Ucenik[]; total: number; page: number; limit: number; totalPages: number }>(`${API_URL}/ucenici`, {
+          params: { page: 1, limit: 10000, all: 'true' }, // Veliki limit da dobijemo sve, all=true za sve učenike
+          timeout: 5000,
+        });
+        console.log('✅ [LOAD_GODINA] API Response raw:', response.data);
+        
+        // API vraća objekt sa { data: [...], total, page, limit, totalPages }
+        const uceniciData = Array.isArray(response.data) ? response.data : (response.data?.data ?? []);
+        const responseData = response.data as { data?: Ucenik[]; total?: number; page?: number; limit?: number; totalPages?: number } | Ucenik[];
+        console.log('✅ [LOAD_GODINA] Učitano učenika prije loadGodina:', {
+          count: uceniciData.length,
+          total: Array.isArray(responseData) ? undefined : responseData?.total,
+          firstFew: Array.isArray(uceniciData) ? uceniciData.slice(0, 3).map(u => ({ id: u.id, ime: u.ime, prezime: u.prezime })) : []
+        });
+        setUcenici(uceniciData);
+        // Čekaj malo da se state ažurira
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (error) {
+        console.error('❌ [LOAD_GODINA] Greška pri učitavanju učenika:', error);
+      }
+    } else {
+      console.log('✅ [LOAD_GODINA] Učenici već učitani:', ucenici.length);
+    }
+    
     try {
       const response = await axios.get<ApiGodinaDetails>(`${API_URL}/nastavne-godine/${godinaId}`, { timeout: 8000 });
       const godina = response.data;
@@ -516,16 +585,39 @@ export default function SetupNastavnaGodinaPage() {
       };
 
       razrediEntries.forEach((entry: ApiRazredGodina) => {
-        const match = entry?.razred?.name?.match?.(/\d+/);
-        const razredNum = match ? Number(match[0]) : NaN;
-        if (Number.isNaN(razredNum)) return;
+        // Special handling for SKOLA_HIFZA razred
+        let razredNum: number;
+        if (entry?.razred?.ilmihal === 'SKOLA_HIFZA') {
+          razredNum = 999;
+        } else {
+          const match = entry?.razred?.name?.match?.(/\d+/);
+          razredNum = match ? Number(match[0]) : NaN;
+        }
+        if (Number.isNaN(razredNum)) {
+          console.log('⚠️ [LOAD_GODINA] Razred nema broj, preskačem:', entry?.razred?.name);
+          return;
+        }
         razrediNums.push(razredNum);
 
         const grupaA = (entry?.grupe ?? []).find((g) => g.naziv === 'A');
         const grupaB = (entry?.grupe ?? []).find((g) => g.naziv === 'B');
+        console.log('📋 [LOAD_GODINA] Razred', razredNum, ':', {
+          grupaA: grupaA ? { naziv: grupaA.naziv, uceniciCount: grupaA.ucenici?.length ?? 0 } : null,
+          grupaB: grupaB ? { naziv: grupaB.naziv, uceniciCount: grupaB.ucenici?.length ?? 0 } : null,
+          allGrupe: entry?.grupe?.map(g => ({ naziv: g.naziv, uceniciCount: g.ucenici?.length ?? 0 }))
+        });
+        
         const uceniciA = (grupaA?.ucenici ?? []).map((u) => u?.ucenik?.id).filter(Boolean) as string[];
         const uceniciB = (grupaB?.ucenici ?? []).map((u) => u?.ucenik?.id).filter(Boolean) as string[];
         const splitOn = !!entry?.split;
+        
+        console.log('📋 [LOAD_GODINA] Extracted IDs za razred', razredNum, ':', {
+          uceniciA: uceniciA.length,
+          uceniciB: uceniciB.length,
+          uceniciAIds: uceniciA.slice(0, 5),
+          uceniciBIds: uceniciB.slice(0, 5),
+          splitOn: splitOn
+        });
 
         korak3[razredNum] = {
           razredId: entry?.razredId ?? entry?.razred?.id ?? getRazredId(razredNum),
@@ -645,14 +737,24 @@ export default function SetupNastavnaGodinaPage() {
   }, [planRazredOptions]);
 
   const filteredUcenici = useMemo(() => {
-    if (!search) return ucenici;
+    console.log('🔍 [FILTERED] useMemo triggered - ucenici.length:', ucenici.length, 'search:', search);
+    if (!Array.isArray(ucenici)) {
+      console.log('⚠️ [FILTERED] ucenici nije array!');
+      return [];
+    }
+    if (!search) {
+      console.log('✅ [FILTERED] Nema search, vraćam sve učenike:', ucenici.length);
+      return ucenici;
+    }
     const lower = search.toLowerCase();
-    return ucenici.filter(
+    const filtered = ucenici.filter(
       (u) =>
         u.ime.toLowerCase().includes(lower) ||
         u.prezime.toLowerCase().includes(lower) ||
         (u.email ?? '').toLowerCase().includes(lower),
     );
+    console.log('✅ [FILTERED] Filtrirano učenika:', filtered.length, 'od', ucenici.length);
+    return filtered;
   }, [search, ucenici]);
 
   const isStep1Valid =
@@ -1283,7 +1385,13 @@ export default function SetupNastavnaGodinaPage() {
                 onClick={() => toggleRazred(razred.nameNum)}
                 onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleRazred(razred.nameNum)}
                 className={`p-4 rounded-xl border shadow-sm transition transform hover:-translate-y-0.5 cursor-pointer ${
-                  active ? 'border-green-500 bg-green-50 ring-1 ring-green-200' : 'border-gray-200 bg-white hover:border-green-300'
+                  active
+                    ? razred.ilmihal === 'SKOLA_HIFZA'
+                      ? 'border-purple-500 bg-purple-50 ring-1 ring-purple-200'
+                      : 'border-green-500 bg-green-50 ring-1 ring-green-200'
+                    : razred.ilmihal === 'SKOLA_HIFZA'
+                      ? 'border-purple-200 bg-white hover:border-purple-300'
+                      : 'border-gray-200 bg-white hover:border-green-300'
                 }`}
               >
                 <div className="flex items-center justify-between mb-3">
@@ -1304,10 +1412,22 @@ export default function SetupNastavnaGodinaPage() {
   );
 
   const renderUceniciList = (razred: number, muallimSelected: boolean, isReadOnly: boolean = false, onCancel?: () => void) => {
-    if (!muallimSelected) return null;
+    console.log('🎯 [RENDER] renderUceniciList called:', { razred, muallimSelected, isReadOnly });
+    if (!muallimSelected) {
+      console.log('⚠️ [RENDER] muallimSelected je false, vraćam null');
+      return null;
+    }
 
     // Koristimo groupA umjesto ucenici za inicijalni odabir
     const entry = data.korak3[razred];
+    console.log('📋 [RENDER] entry za razred', razred, ':', {
+      razredId: entry?.razredId,
+      muallimId: entry?.muallimId,
+      groupA: entry?.split?.groupA?.length ?? 0,
+      groupB: entry?.split?.groupB?.length ?? 0,
+      oldUcenici: entry?.ucenici?.length ?? 0
+    });
+    
     const groupA = entry?.split?.groupA ?? [];
     const groupB = entry?.split?.groupB ?? [];
     const allSelected = [...groupA, ...groupB];
@@ -1315,6 +1435,14 @@ export default function SetupNastavnaGodinaPage() {
     const oldUcenici = entry?.ucenici ?? [];
     const initialSelection = allSelected.length > 0 ? allSelected : oldUcenici;
     const selected = new Set(initialSelection);
+    console.log('📋 [RENDER] Selected IDs:', {
+      groupA: groupA.length,
+      groupB: groupB.length,
+      oldUcenici: oldUcenici.length,
+      initialSelection: initialSelection.length,
+      selectedSize: selected.size,
+      selectedIds: Array.from(selected).slice(0, 5)
+    });
 
     // Sakrij učenike koji su već dodijeljeni drugim razredima, ali ostavi one već odabrane za ovaj razred
     const occupiedIds = new Set<string>();
@@ -1330,7 +1458,46 @@ export default function SetupNastavnaGodinaPage() {
       alreadyPlaced.forEach((id) => occupiedIds.add(id));
     });
 
-    const availableUcenici = filteredUcenici.filter((u) => !occupiedIds.has(u.id) || selected.has(u.id));
+    // Debug: provjeri stanje
+    console.log('🔍 [RENDER] State check:', {
+      uceniciIsArray: Array.isArray(ucenici),
+      uceniciLength: ucenici.length,
+      filteredUceniciIsArray: Array.isArray(filteredUcenici),
+      filteredUceniciLength: Array.isArray(filteredUcenici) ? filteredUcenici.length : 0,
+      search: search
+    });
+    
+    const allUcenici = Array.isArray(filteredUcenici) ? filteredUcenici : (Array.isArray(ucenici) ? ucenici : []);
+    console.log('🔍 [RENDER] allUcenici:', {
+      length: allUcenici.length,
+      firstFew: allUcenici.slice(0, 3).map(u => ({ id: u.id, ime: u.ime, prezime: u.prezime })),
+      occupiedIdsSize: occupiedIds.size,
+      selectedSize: selected.size,
+      occupiedIds: Array.from(occupiedIds).slice(0, 5),
+      selectedIds: Array.from(selected).slice(0, 5)
+    });
+    
+    // Za read-only mod, prikaži sve odabrane učenike (čak i ako su "zauzeti" u drugim razredima)
+    // Za edit mod, filtriraj normalno
+    const availableUcenici = isReadOnly
+      ? allUcenici.filter((u) => {
+          const has = selected.has(u.id);
+          if (has) console.log('✅ [RENDER] Učenik u selected:', u.id, u.ime, u.prezime);
+          return has;
+        }) // Samo odabrani u read-only modu
+      : allUcenici.filter((u) => {
+          const notOccupied = !occupiedIds.has(u.id);
+          const inSelected = selected.has(u.id);
+          const include = notOccupied || inSelected;
+          if (!include) console.log('❌ [RENDER] Učenik isključen:', u.id, u.ime, u.prezime, { notOccupied, inSelected });
+          return include;
+        }); // Normalno filtriranje u edit modu
+    
+    console.log('✅ [RENDER] availableUcenici:', {
+      length: availableUcenici.length,
+      isReadOnly: isReadOnly,
+      firstFew: availableUcenici.slice(0, 3).map(u => ({ id: u.id, ime: u.ime, prezime: u.prezime }))
+    });
 
     const finalizeSelection = () => {
       const selectedArr = Array.from(selected);
@@ -1380,7 +1547,7 @@ export default function SetupNastavnaGodinaPage() {
     };
     return (
       <div className="space-y-2">
-        {!isReadOnly && (
+        {!isReadOnly ? (
           <>
             <input
               type="text"
@@ -1390,6 +1557,16 @@ export default function SetupNastavnaGodinaPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <div className="h-64 overflow-y-auto border border-gray-200 rounded-lg p-2 bg-white">
+              {availableUcenici.length === 0 ? (
+                <div className="text-center py-8 text-gray-500 text-sm">
+                  {ucenici.length === 0 
+                    ? 'Učitavam učenike...' 
+                    : allUcenici.length === 0
+                    ? 'Nema učenika u sistemu'
+                    : `Nema dostupnih učenika (ukupno: ${allUcenici.length}, zauzeti: ${occupiedIds.size}, odabrani: ${selected.size})`
+                  }
+                </div>
+              ) : (
               <div className="space-y-1">
                 {availableUcenici.map((u) => {
                   const isSelected = selected.has(u.id);
@@ -1421,6 +1598,7 @@ export default function SetupNastavnaGodinaPage() {
                   );
                 })}
               </div>
+              )}
             </div>
             <div className="flex flex-row items-center justify-end gap-2">
               {onCancel && (
@@ -1440,6 +1618,53 @@ export default function SetupNastavnaGodinaPage() {
               </button>
             </div>
           </>
+        ) : (
+          // Read-only prikaz odabranih učenika
+          <div className="border border-gray-200 rounded-lg p-3 bg-white">
+            {(() => {
+              console.log('📊 [RENDER] Read-only prikaz:', {
+                selectedSize: selected.size,
+                allUceniciLength: allUcenici.length,
+                selectedIds: Array.from(selected).slice(0, 10),
+                allUceniciIds: allUcenici.slice(0, 5).map(u => u.id)
+              });
+              return null;
+            })()}
+            {selected.size === 0 ? (
+              <div className="text-center py-4 text-sm text-gray-500">
+                Nema odabranih učenika (selected.size: {selected.size}, allUcenici.length: {allUcenici.length})
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-gray-700 mb-2">
+                  Odabrani učenici ({selected.size})
+                </div>
+                <div className="space-y-1 max-h-64 overflow-y-auto">
+                  {Array.from(selected).map((ucenikId) => {
+                    const u = allUcenici.find((x) => x.id === ucenikId);
+                    if (!u) {
+                      console.log('⚠️ [RENDER] Učenik nije pronađen u allUcenici:', ucenikId);
+                      return null;
+                    }
+                    return (
+                      <div
+                        key={ucenikId}
+                        className="flex items-center justify-between px-3 py-2 rounded bg-gray-50 border border-gray-200"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">
+                            {u.ime} {u.prezime}
+                          </p>
+                          <p className="text-xs text-gray-500 font-medium">{u.email}</p>
+                        </div>
+                        <span className="text-xs text-green-700 font-semibold">Odabrano</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     );
@@ -1856,6 +2081,8 @@ const renderTimelineSchedule = (
       const isCurrentRazredPending = excludeRazred !== undefined && r === excludeRazred;
       
       const baseLabel = labelGrupa(r);
+      const razredMeta = razredByNumber.get(r);
+      const isSkolaHifza = razredMeta?.ilmihal === 'SKOLA_HIFZA';
 
       const pushSlot = (sch?: Schedule, grupa?: string, grupaTarget?: 'single' | 'groupA' | 'groupB') => {
         // Filter by location and day
@@ -1871,11 +2098,16 @@ const renderTimelineSchedule = (
           start: sch.slot,
           end: getEndTime(sch.slot, dur),
           label: grupa ? `${baseLabel} • ${grupa}` : baseLabel,
-          color: entry.split.enabled
-            ? grupa === 'Grupa 2'
+          // Na Setup stranici jedina razlika po tipu je vizuelna:
+          // - obični razredi: plave nijanse (postojeće)
+          // - Škola hifza: ljubičaste nijanse
+          color: isSkolaHifza
+            ? entry.split.enabled && grupa === 'Grupa 2'
+              ? 'bg-purple-100 border-purple-300 text-purple-900'
+              : 'bg-purple-50 border-purple-200 text-purple-900'
+            : entry.split.enabled && grupa === 'Grupa 2'
               ? 'bg-blue-100 border-blue-300 text-blue-900'
-              : 'bg-blue-50 border-blue-200 text-blue-900'
-            : 'bg-blue-50 border-blue-200 text-blue-900',
+              : 'bg-blue-50 border-blue-200 text-blue-900',
           startMin,
           endMin,
         });
@@ -2606,7 +2838,13 @@ const renderTimelineSchedule = (
                           </div>
                           <div className="flex-1 flex items-center">
                             <div className="flex-1 pr-3 border-r border-gray-300">
-                              <div className="text-lg font-bold text-gray-900">{entry.split.groupA?.length ?? 0}</div>
+                              <div className="text-lg font-bold text-gray-900">
+                                {(() => {
+                                  const groupA = entry.split?.groupA ?? [];
+                                  const oldUcenici = entry?.ucenici ?? [];
+                                  return groupA.length > 0 ? groupA.length : oldUcenici.length;
+                                })()}
+                              </div>
                               <div className="text-[10px] text-gray-500 font-medium">Učenika</div>
                             </div>
                             <div className="flex-1 pl-3">
@@ -2837,10 +3075,14 @@ const renderTimelineSchedule = (
                                 Odabrano: <span className="font-bold">{(() => {
                                 const entry = data.korak3[r];
                                 if (!entry) return 0;
+                                const groupA = entry.split?.groupA ?? [];
+                                const groupB = entry.split?.groupB ?? [];
+                                const oldUcenici = entry?.ucenici ?? [];
                                 if (entry.split?.enabled) {
-                                  return (entry.split.groupA?.length ?? 0) + (entry.split.groupB?.length ?? 0);
+                                  const total = groupA.length + groupB.length;
+                                  return total > 0 ? total : oldUcenici.length;
                                 }
-                                return entry.split?.groupA?.length ?? 0;
+                                return groupA.length > 0 ? groupA.length : oldUcenici.length;
                                 })()}</span> učenika
                               </div>
                             </div>

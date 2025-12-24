@@ -29,64 +29,10 @@ npx prisma migrate deploy
 
 echo "🌱 Seeding database..."
 
-echo "  📝 Seeding korisnici (admin i muallim)..."
+echo "  📝 Seeding korisnici, razredi i lekcije (KURAN i SUFARA)..."
 if ! npm run prisma:seed; then
-  echo "❌ Greška pri seed-u korisnika"
+  echo "❌ Greška pri seed-u"
   exit 1
-fi
-
-echo "  📚 Seeding nastavni plan..."
-if ! npm run prisma:seed-nastavni-plan; then
-  echo "❌ Greška pri seed-u nastavnog plana"
-  exit 1
-fi
-
-echo "  📖 Seeding lekcije..."
-if ! npm run prisma:seed-lekcije; then
-  echo "⚠️  Upozorenje: Seed lekcija nije uspješan"
-  echo "   Ovo je opciono - lekcije se mogu dodati i kasnije"
-fi
-
-echo "  📅 Seeding nastavna godina..."
-if ! npm run prisma:seed-nastavna-godina; then
-  echo "❌ Greška pri seed-u nastavne godine"
-  exit 1
-fi
-
-echo "  👨‍🎓 Seeding učenici iz CSV..."
-if ! npm run prisma:seed-ucenici; then
-  echo "⚠️  Upozorenje: Seed učenika nije uspješan (možda CSV fajl nije pronađen)"
-  echo "   Ovo je opciono - učenici se mogu importovati i kasnije"
-fi
-
-echo "  👥 Seeding grupe..."
-if ! npm run prisma:seed-grupe; then
-  echo "❌ Greška pri seed-u grupa"
-  exit 1
-fi
-
-echo "  🔗 Dodavanje učenika u grupe..."
-if ! npm run prisma:seed-ucenici-grupe; then
-  echo "⚠️  Upozorenje: Dodavanje učenika u grupe nije uspješan"
-  echo "   Ovo je opciono - učenici se mogu dodati u grupe i kasnije"
-fi
-
-echo "  📖 Seeding casovi, prisustva i ocjene..."
-if ! npm run prisma:seed-casovi; then
-  echo "⚠️  Upozorenje: Seed casova nije uspješan (možda nema učenika u grupama ili lekcija)"
-  echo "   Ovo je opciono - casovi će se kreirati kada se učenici dodaju u grupe i kada postoje lekcije"
-fi
-
-echo "  📝 Seeding dodatne ocjene za sve učenike i lekcije..."
-if ! npm run prisma:seed-ocjene; then
-  echo "⚠️  Upozorenje: Seed ocjena nije uspješan (možda nema casova ili učenika)"
-  echo "   Ovo je opciono - ocjene će se kreirati kada se casovi kreiraju"
-fi
-
-echo "  🎯 Seeding kompletan seed (popunjava sve tabele sa podacima)..."
-if ! npm run prisma:seed-all; then
-  echo "⚠️  Upozorenje: Kompletan seed nije uspješan"
-  echo "   Ovo je opciono - pokušava da popuni sve tabele sa podacima"
 fi
 
 echo "✅ Database initialization complete!"

@@ -34,9 +34,11 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
   const [saving, setSaving] = useState(false);
   const [lessonSearch, setLessonSearch] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
-  const [selectedLessonByStudent, setSelectedLessonByStudent] = useState<Record<string, string | null>>({});
+  const [studentLessons, setStudentLessons] = useState<Record<string, string[]>>({});
   const [lessonInputByStudent, setLessonInputByStudent] = useState<Record<string, string>>({});
   const [openLessonStudentId, setOpenLessonStudentId] = useState<string | null>(null);
+  const [expandedLessonsByStudent, setExpandedLessonsByStudent] = useState<Record<string, Set<string>>>({});
+  const [expandedStudentCards, setExpandedStudentCards] = useState<Set<string>>(new Set());
   const lessonDropdownRef = useRef<HTMLDivElement | null>(null);
   const [gradeStudentSearch, setGradeStudentSearch] = useState('');
   const [existingCasId, setExistingCasId] = useState<string | null>(null);
@@ -290,10 +292,10 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
           });
         });
 
-        const defaultSelectedLessons: Record<string, string | null> = {};
+        const defaultStudentLessons: Record<string, string[]> = {};
         const defaultLessonInputs: Record<string, string> = {};
         fetchedStudents.forEach((s) => {
-          defaultSelectedLessons[s.id] = null;
+          defaultStudentLessons[s.id] = [];
           defaultLessonInputs[s.id] = '';
         });
 
@@ -306,7 +308,7 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
           ocjene: defaultGrades,
         };
         
-        const initialSelectedLessons = { ...defaultSelectedLessons };
+        const initialStudentLessons = { ...defaultStudentLessons };
         const initialLessonInputs = { ...defaultLessonInputs };
         let casId: string | null = null;
 
@@ -341,14 +343,12 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
               grades[lesson.id][s.id] = { ocjena: null, komentar: '' };
             });
           });
-          // Pomoćna mapa da zapamtimo zadnju ocjenu po učeniku (za inicijalni odabir lekcije pri uređivanju)
-          const latestByStudent: Record<
-            string,
-            {
-              lekcijaId: string;
-              vrijeme: string | Date;
-            }
-          > = {};
+
+          // Popuni studentLessons iz postojećih ocjena - izvuci sve lekcije koje imaju ocjene za svakog učenika
+          const lessonsByStudent: Record<string, Set<string>> = {};
+          fetchedStudents.forEach((s) => {
+            lessonsByStudent[s.id] = new Set();
+          });
 
           (cas.ocjene || []).forEach((o: any) => {
             const lekcijaId = o.lekcija?.id || o.lekcijaId;
@@ -359,19 +359,16 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                 komentar: o.komentar || '',
               };
 
-              const vrijeme = o.vrijeme || cas.datum;
-              const prev = latestByStudent[ucenikId];
-              if (!prev || new Date(vrijeme) > new Date(prev.vrijeme)) {
-                latestByStudent[ucenikId] = { lekcijaId, vrijeme };
+              // Dodaj lekciju u listu lekcija za ovog učenika
+              if (lessonsByStudent[ucenikId]) {
+                lessonsByStudent[ucenikId].add(lekcijaId);
               }
             }
           });
 
-          // Inicijalno odaberi zadnju lekciju za svakog učenika (da bi se ocjena vidjela pri uređivanju)
-          Object.entries(latestByStudent).forEach(([ucenikId, info]) => {
-            if (defaultSelectedLessons[ucenikId] === null) {
-              initialSelectedLessons[ucenikId] = info.lekcijaId;
-            }
+          // Konvertuj Set u array za svakog učenika
+          Object.entries(lessonsByStudent).forEach(([ucenikId, lessonSet]) => {
+            initialStudentLessons[ucenikId] = Array.from(lessonSet);
           });
 
           initialFormData.ocjene = grades;
@@ -381,7 +378,7 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
         setStudents(fetchedStudents);
         setExistingCasId(casId);
         setCasFormData(initialFormData);
-        setSelectedLessonByStudent(initialSelectedLessons);
+        setStudentLessons(initialStudentLessons);
         setLessonInputByStudent(initialLessonInputs);
         setStudentLessonStats(
           statsRes?.data
@@ -430,6 +427,26 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
       return titleMatch || tipMatch;
     });
   }, [lessons, lessonSearch]);
+
+  // Grupiši lekcije po tipovima
+  const lessonsByType = useMemo(() => {
+    const grouped: {
+      ILMIHAL: Lesson[];
+      KURAN: Lesson[];
+      SUFARA: Lesson[];
+    } = {
+      ILMIHAL: [],
+      KURAN: [],
+      SUFARA: [],
+    };
+
+    filteredLessons.forEach((lesson) => {
+      const tip = (lesson.tip ?? 'ILMIHAL') as 'ILMIHAL' | 'KURAN' | 'SUFARA';
+      grouped[tip].push(lesson);
+    });
+
+    return grouped;
+  }, [filteredLessons]);
 
   const filteredStudents = useMemo(
     () =>
@@ -480,6 +497,103 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
         },
       },
     }));
+  };
+
+  const addLessonToStudent = (studentId: string, lessonId: string) => {
+    setStudentLessons((prev) => {
+      const currentLessons = prev[studentId] || [];
+      if (currentLessons.includes(lessonId)) {
+        return prev; // Already added
+      }
+      return {
+        ...prev,
+        [studentId]: [...currentLessons, lessonId],
+      };
+    });
+    // Initialize grade entry if it doesn't exist
+    setCasFormData((prev) => {
+      if (!prev.ocjene[lessonId]?.[studentId]) {
+        return {
+          ...prev,
+          ocjene: {
+            ...prev.ocjene,
+            [lessonId]: {
+              ...(prev.ocjene[lessonId] || {}),
+              [studentId]: { ocjena: null, komentar: '' },
+            },
+          },
+        };
+      }
+      return prev;
+    });
+    // Expand the accordion for this lesson
+    setExpandedLessonsByStudent((prev) => {
+      const current = prev[studentId] || new Set();
+      return {
+        ...prev,
+        [studentId]: new Set([...current, lessonId]),
+      };
+    });
+  };
+
+  const removeLessonFromStudent = (studentId: string, lessonId: string) => {
+    setStudentLessons((prev) => {
+      const currentLessons = prev[studentId] || [];
+      return {
+        ...prev,
+        [studentId]: currentLessons.filter((id) => id !== lessonId),
+      };
+    });
+    // Clear the grade entry
+    setCasFormData((prev) => {
+      const newOcjene = { ...prev.ocjene };
+      if (newOcjene[lessonId]?.[studentId]) {
+        newOcjene[lessonId] = { ...newOcjene[lessonId] };
+        delete newOcjene[lessonId][studentId];
+      }
+      return {
+        ...prev,
+        ocjene: newOcjene,
+      };
+    });
+    // Collapse the accordion
+    setExpandedLessonsByStudent((prev) => {
+      const current = prev[studentId] || new Set();
+      const newSet = new Set(current);
+      newSet.delete(lessonId);
+      return {
+        ...prev,
+        [studentId]: newSet,
+      };
+    });
+  };
+
+  const toggleLessonExpanded = (studentId: string, lessonId: string) => {
+    setExpandedLessonsByStudent((prev) => {
+      const current = prev[studentId] || new Set();
+      const newSet = new Set(current);
+      if (newSet.has(lessonId)) {
+        newSet.delete(lessonId);
+      } else {
+        newSet.add(lessonId);
+      }
+      return {
+        ...prev,
+        [studentId]: newSet,
+      };
+    });
+  };
+
+  const toggleStudentCard = (studentId: string) => {
+    setExpandedStudentCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) {
+        next.delete(studentId);
+      } else {
+        next.add(studentId);
+      }
+      return next;
+    });
   };
 
   const payloadPreview = useMemo(() => {
@@ -865,56 +979,155 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                     </div>
                   </div>
 
-                  {/* Scrollable multiselect lista */}
-                  <div className="border border-slate-200 rounded-xl bg-slate-50 max-h-64 overflow-y-auto">
+                  {/* Scrollable multiselect lista - podijeljena po tipovima u tri kolone */}
+                  <div className="border border-slate-200 rounded-xl bg-slate-50 max-h-96 overflow-y-auto">
                     {filteredLessons.length === 0 ? (
                       <div className="px-3 py-3 text-sm text-slate-500">
                         Nema lekcija za prikaz sa zadatim filterom.
                       </div>
                     ) : (
-                      <ul className="divide-y divide-slate-200">
-                        {filteredLessons.map((lesson) => {
-                          const selected = casFormData.lekcije.includes(lesson.id);
-                          const tip = (lesson.tip ?? 'ILMIHAL') as 'ILMIHAL' | 'KURAN' | 'SUFARA';
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3">
+                        {/* ILMIHAL kolona */}
+                        <div className="flex flex-col h-[320px] border border-slate-200 rounded-lg bg-white overflow-hidden">
+                          <div className="flex-shrink-0 bg-slate-50 px-3 py-2 border-b border-slate-200">
+                            <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wide flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                              Ilmihal
+                              <span className="ml-auto text-[10px] font-normal text-slate-500">
+                                ({lessonsByType.ILMIHAL.length})
+                              </span>
+                            </h4>
+                          </div>
+                          <div className="flex-1 overflow-y-auto">
+                            <ul className="space-y-1 p-2">
+                              {lessonsByType.ILMIHAL.length === 0 ? (
+                                <li className="text-[11px] text-slate-400 italic px-2 py-1">
+                                  Nema lekcija
+                                </li>
+                              ) : (
+                                lessonsByType.ILMIHAL.map((lesson) => {
+                                  const selected = casFormData.lekcije.includes(lesson.id);
+                                  return (
+                                    <li key={lesson.id}>
+                                      <label
+                                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                          selected
+                                            ? 'bg-blue-50 border border-blue-200'
+                                            : 'hover:bg-slate-100/60'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={!!selected}
+                                          onChange={() => toggleLesson(lesson.id)}
+                                          className="w-3.5 h-3.5 text-blue-600 border-slate-300 rounded focus:ring-blue-500 flex-shrink-0"
+                                        />
+                                        <span className="text-xs text-slate-900 leading-tight">
+                                          {lesson.naslov}
+                                        </span>
+                                      </label>
+                                    </li>
+                                  );
+                                })
+                              )}
+                            </ul>
+                          </div>
+                        </div>
 
-                          const tipBadgeClasses =
-                            tip === 'KURAN'
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                              : tip === 'SUFARA'
-                                ? 'bg-cyan-50 text-cyan-800 border-cyan-200'
-                                : 'bg-slate-100 text-slate-700 border-slate-200';
+                        {/* KURAN kolona */}
+                        <div className="flex flex-col h-[320px] border border-emerald-200 rounded-lg bg-white overflow-hidden">
+                          <div className="flex-shrink-0 bg-emerald-50 px-3 py-2 border-b border-emerald-200">
+                            <h4 className="text-xs font-semibold text-emerald-700 uppercase tracking-wide flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                              Kuran
+                              <span className="ml-auto text-[10px] font-normal text-emerald-600">
+                                ({lessonsByType.KURAN.length})
+                              </span>
+                            </h4>
+                          </div>
+                          <div className="flex-1 overflow-y-auto">
+                            <ul className="space-y-1 p-2">
+                              {lessonsByType.KURAN.length === 0 ? (
+                                <li className="text-[11px] text-slate-400 italic px-2 py-1">
+                                  Nema lekcija
+                                </li>
+                              ) : (
+                                lessonsByType.KURAN.map((lesson) => {
+                                  const selected = casFormData.lekcije.includes(lesson.id);
+                                  return (
+                                    <li key={lesson.id}>
+                                      <label
+                                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                          selected
+                                            ? 'bg-emerald-50 border border-emerald-200'
+                                            : 'hover:bg-emerald-50/40'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={!!selected}
+                                          onChange={() => toggleLesson(lesson.id)}
+                                          className="w-3.5 h-3.5 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500 flex-shrink-0"
+                                        />
+                                        <span className="text-xs text-slate-900 leading-tight">
+                                          {lesson.naslov}
+                                        </span>
+                                      </label>
+                                    </li>
+                                  );
+                                })
+                              )}
+                            </ul>
+                          </div>
+                        </div>
 
-                          const tipLabel =
-                            tip === 'KURAN' ? 'Kuran' : tip === 'SUFARA' ? 'Sufara' : 'Ilmihal';
-
-                          return (
-                            <li key={lesson.id}>
-                              <label
-                                className={`flex items-center justify-between px-3 py-2.5 cursor-pointer transition-colors ${
-                                  selected
-                                    ? 'bg-blue-50/70'
-                                    : 'hover:bg-slate-100/70'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={!!selected}
-                                    onChange={() => toggleLesson(lesson.id)}
-                                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                                  />
-                                  <span className="text-sm text-slate-900">{lesson.naslov}</span>
-                                </div>
-                                <span
-                                  className={`ml-3 inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${tipBadgeClasses}`}
-                                >
-                                  {tipLabel}
-                                </span>
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
+                        {/* SUFARA kolona */}
+                        <div className="flex flex-col h-[320px] border border-cyan-200 rounded-lg bg-white overflow-hidden">
+                          <div className="flex-shrink-0 bg-cyan-50 px-3 py-2 border-b border-cyan-200">
+                            <h4 className="text-xs font-semibold text-cyan-700 uppercase tracking-wide flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-cyan-500"></span>
+                              Sufara
+                              <span className="ml-auto text-[10px] font-normal text-cyan-600">
+                                ({lessonsByType.SUFARA.length})
+                              </span>
+                            </h4>
+                          </div>
+                          <div className="flex-1 overflow-y-auto">
+                            <ul className="space-y-1 p-2">
+                              {lessonsByType.SUFARA.length === 0 ? (
+                                <li className="text-[11px] text-slate-400 italic px-2 py-1">
+                                  Nema lekcija
+                                </li>
+                              ) : (
+                                lessonsByType.SUFARA.map((lesson) => {
+                                  const selected = casFormData.lekcije.includes(lesson.id);
+                                  return (
+                                    <li key={lesson.id}>
+                                      <label
+                                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                          selected
+                                            ? 'bg-cyan-50 border border-cyan-200'
+                                            : 'hover:bg-cyan-50/40'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={!!selected}
+                                          onChange={() => toggleLesson(lesson.id)}
+                                          className="w-3.5 h-3.5 text-cyan-600 border-slate-300 rounded focus:ring-cyan-500 flex-shrink-0"
+                                        />
+                                        <span className="text-xs text-slate-900 leading-tight">
+                                          {lesson.naslov}
+                                        </span>
+                                      </label>
+                                    </li>
+                                  );
+                                })
+                              )}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
 
@@ -1181,16 +1394,9 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                           return avgB - avgA;
                         })
                         .map((student) => {
-                          const baseSelectedLessonId =
-                            selectedLessonByStudent[student.id] ?? null;
-
-                          const selectedLessonId = baseSelectedLessonId ?? null;
-                          const record =
-                            (selectedLessonId &&
-                              casFormData.ocjene[selectedLessonId]?.[student.id]) || {
-                              ocjena: null,
-                              komentar: '',
-                            };
+                          const studentLessonsList = studentLessons[student.id] || [];
+                          const lessonsTodayCount = studentLessonsList.length;
+                          const isCardOpen = expandedStudentCards.has(student.id);
 
                           const getActiveGradeClasses = (grade: number) => {
                             switch (grade) {
@@ -1228,194 +1434,148 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                           return (
                             <div
                               key={student.id}
-                              className="grid grid-cols-1 md:grid-cols-[1.1fr,0.9fr,1.1fr] gap-2 items-start px-3 py-3 rounded-lg bg-slate-50/70 border border-slate-200"
+                              className="rounded-lg bg-slate-50/70 border border-slate-200"
                             >
-                              {/* Učenik + stat linija */}
-                              <div className="flex flex-col gap-1.5">
+                              {/* Student header (full row) */}
+                              <button
+                                type="button"
+                                onClick={() => toggleStudentCard(student.id)}
+                                className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 py-3 hover:bg-slate-100/60 transition-colors"
+                              >
                                 <div className="flex items-center gap-3">
                                   <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-700">
                                     {student.ime.charAt(0)}
                                     {student.prezime.charAt(0)}
                                   </div>
-                                  <div className="space-y-0.5">
+                                  <div className="space-y-0.5 text-left">
                                     <div className="text-sm font-semibold text-slate-900">
                                       {student.ime} {student.prezime}
                                     </div>
+                                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+                                        Lekcije danas: {lessonsTodayCount}
+                                      </span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                        Naučeno: {percent}%
+                                      </span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                                        {learned}/{totalLessons || '—'} lekcija
+                                    </span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100">
+                                        Prosjek: {avg != null ? avg.toFixed(1) : '—'}
+                                    </span>
+                                  </div>
                                   </div>
                                 </div>
-                                <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
-                                  {/* Mini graf napretka */}
-                                  <div className="flex flex-col gap-2">
-                                    <div className="w-24 h-2 rounded-full bg-slate-200 overflow-hidden">
-                                      <div
-                                        className="h-full bg-emerald-500 rounded-full"
-                                        style={{ width: `${percent}%` }}
-                                      />
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                      <span className="font-semibold text-slate-900">
-                                        {percent}%
-                                      </span>
-                                      <span className="uppercase tracking-wide text-slate-500">
-                                        Naučenog gradiva
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <span className="w-px h-6 bg-slate-200" />
-                                  <div className="flex flex-col">
-                                    <span className="font-semibold text-slate-900">
-                                      {learned}/{totalLessons || '—'}
-                                    </span>
-                                    <span className="uppercase tracking-wide text-slate-500">
-                                      Lekcija
-                                    </span>
-                                  </div>
-                                  <span className="w-px h-6 bg-slate-200" />
-                                  <div className="flex flex-col">
-                                    <span className="font-semibold text-slate-900">
-                                      {avg != null ? avg.toFixed(1) : '—'}
-                                    </span>
-                                    <span className="uppercase tracking-wide text-slate-500">
-                                      Prosjek
-                                    </span>
-                                  </div>
-                                  {/* Historija ocjena se otvara kroz accordion ispod, bez dodatnog dugmeta ovdje */}
-                                </div>
-                              </div>
-
-                              {/* Lekcija + ocjene */}
-                              <div className="flex flex-col gap-2">
-                                <div
-                                  className="relative"
-                                  ref={openLessonStudentId === student.id ? lessonDropdownRef : null}
-                                >
+                                <div className="flex items-center gap-3">
+                                  <span className="text-[11px] text-slate-500">Prikaži detalje</span>
                                   <svg
-                                    className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                                    className={`w-4 h-4 text-slate-500 transition-transform ${isCardOpen ? 'rotate-180' : ''}`}
                                     fill="none"
                                     stroke="currentColor"
                                     viewBox="0 0 24 24"
                                   >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2}
-                                      d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z"
-                                    />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                   </svg>
-                                  {(() => {
-                                    const rawInputValue = lessonInputByStudent[student.id] ?? '';
-                                    const isOpen = openLessonStudentId === student.id;
+                                </div>
+                              </button>
 
-                                    const displayValue =
-                                      isOpen && rawInputValue.length > 0
-                                        ? rawInputValue
-                                        : selectedLessonId
-                                          ? lessons.find((l) => l.id === selectedLessonId)?.naslov ??
-                                            ''
-                                          : '';
-
-                                    const filterTerm = isOpen ? rawInputValue : '';
-                                    const filteredLessonsForStudent =
-                                      filterTerm.trim().length === 0
-                                        ? lessons
-                                        : lessons.filter((l) =>
-                                            l.naslov
-                                              .toLowerCase()
-                                              .includes(filterTerm.toLowerCase()),
-                                          );
+                              {isCardOpen && (
+                                <div className="px-3 pb-3 space-y-3">
+                                  <p className="text-xs font-semibold text-slate-700">
+                                    Lekcije ocijenjene na ovom času
+                                  </p>
+                                  <div className="space-y-2">
+                                    {studentLessonsList.length > 0 ? (
+                                      <div className="space-y-2">
+                                        {studentLessonsList.map((lessonId) => {
+                                          const lesson = lessons.find((l) => l.id === lessonId);
+                                          if (!lesson) return null;
+                                          const record = casFormData.ocjene[lessonId]?.[student.id] || {
+                                            ocjena: null,
+                                            komentar: '',
+                                          };
+                                          const isExpanded = expandedLessonsByStudent[student.id]?.has(lessonId) ?? false;
 
                                     return (
-                                      <>
-                                        <input
-                                          value={displayValue}
-                                          onChange={(e) => {
-                                            const value = e.target.value;
-                                            setLessonInputByStudent((prev) => ({
-                                              ...prev,
-                                              [student.id]: value,
-                                            }));
-                                            setOpenLessonStudentId(student.id);
-                                          }}
-                                          onFocus={() => setOpenLessonStudentId(student.id)}
-                                          onClick={() => setOpenLessonStudentId(student.id)}
-                                          placeholder="Počni tipkati naziv lekcije..."
-                                          className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                        />
+                                            <div
+                                              key={lessonId}
+                                              className="border border-slate-200 rounded-xl bg-white overflow-hidden"
+                                            >
                                         <button
                                           type="button"
-                                          onClick={() => {
-                                            setLessonInputByStudent((prev) => ({
-                                              ...prev,
-                                              [student.id]: '',
-                                            }));
-                                            setOpenLessonStudentId((current) =>
-                                              current === student.id ? null : student.id,
-                                            );
-                                          }}
-                                          className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center justify-center rounded-md p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                                        >
-                                          <svg
-                                            className={`w-4 h-4 transition-transform ${
-                                              openLessonStudentId === student.id ? 'rotate-180' : ''
+                                                onClick={() => toggleLessonExpanded(student.id, lessonId)}
+                                                className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors"
+                                              >
+                                                <div className="flex items-center gap-3 flex-1 text-left">
+                                                  <svg
+                                                    className={`w-4 h-4 text-slate-500 transition-transform ${
+                                                      isExpanded ? 'rotate-90' : ''
                                             }`}
                                             fill="none"
                                             stroke="currentColor"
                                             viewBox="0 0 24 24"
                                           >
-                                            <path
-                                              strokeLinecap="round"
-                                              strokeLinejoin="round"
-                                              strokeWidth={2}
-                                              d="M19 9l-7 7-7-7"
-                                            />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                           </svg>
-                                        </button>
-                                        {openLessonStudentId === student.id &&
-                                          filteredLessonsForStudent.length > 0 && (
-                                            <div className="absolute left-0 right-0 top-full mt-1 max-h-44 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg z-40">
-                                              <ul className="py-1 text-sm text-slate-700">
-                                                {filteredLessonsForStudent.map((l) => (
-                                                  <li key={l.id}>
+                                                  <span className="text-sm font-semibold text-slate-900">
+                                                    {lesson.naslov}
+                                                  </span>
+                                                  {lesson.tip && (
+                                                    <span
+                                                      className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                                                        lesson.tip === 'KURAN'
+                                                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                          : lesson.tip === 'SUFARA'
+                                                          ? 'bg-cyan-50 text-cyan-800 border-cyan-200'
+                                                          : 'bg-slate-100 text-slate-700 border-slate-200'
+                                                      }`}
+                                                    >
+                                                      {lesson.tip === 'KURAN'
+                                                        ? 'Kuran'
+                                                        : lesson.tip === 'SUFARA'
+                                                          ? 'Sufara'
+                                                          : 'Ilmihal'}
+                                                    </span>
+                                                  )}
+                                                  {record.ocjena !== null && (
+                                                    <span
+                                                      className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                                                        getActiveGradeClasses(record.ocjena)
+                                                      }`}
+                                                    >
+                                                      {record.ocjena}
+                                                    </span>
+                                                  )}
+                                                </div>
                                                     <button
                                                       type="button"
-                                                      className={`flex w-full items-center justify-between px-3 py-1.5 text-left hover:bg-slate-50 ${
-                                                        selectedLessonId === l.id
-                                                          ? 'bg-slate-50 font-semibold text-slate-900'
-                                                          : ''
-                                                      }`}
-                                                      onClick={() => {
-                                                        setSelectedLessonByStudent((prev) => ({
-                                                          ...prev,
-                                                          [student.id]: l.id,
-                                                        }));
-                                                        setLessonInputByStudent((prev) => ({
-                                                          ...prev,
-                                                          [student.id]: '',
-                                                        }));
-                                                        setOpenLessonStudentId(null);
-                                                      }}
-                                                    >
-                                                      <span className="truncate">{l.naslov}</span>
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    removeLessonFromStudent(student.id, lessonId);
+                                                  }}
+                                                  className="ml-2 p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                                                  title="Ukloni lekciju"
+                                                >
+                                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                  </svg>
                                                     </button>
-                                                  </li>
-                                                ))}
-                                              </ul>
-                                            </div>
-                                          )}
-                                      </>
-                                    );
-                                  })()}
-                                </div>
+                                              </button>
+
+                                              {isExpanded && (
+                                                <div className="px-4 pb-4 space-y-3 border-t border-slate-200">
+                                                  <div>
+                                                    <label className="block text-xs font-semibold text-slate-700 mb-2">
+                                                      Ocjena
+                                                    </label>
                                 <div className="flex items-center gap-1">
                                   {[5, 4, 3, 2, 1].map((g) => {
                                     const active = record.ocjena === g;
                                     return (
                                       <button
                                         key={g}
-                                        onClick={() =>
-                                          selectedLessonId &&
-                                          updateOcjena(selectedLessonId, student.id, g)
-                                        }
+                                                            onClick={() => updateOcjena(lessonId, student.id, g)}
                                         className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-all ${
                                           active
                                             ? getActiveGradeClasses(g)
@@ -1427,10 +1587,7 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                                     );
                                   })}
                                   <button
-                                    onClick={() =>
-                                      selectedLessonId &&
-                                      updateOcjena(selectedLessonId, student.id, null)
-                                    }
+                                                        onClick={() => updateOcjena(lessonId, student.id, null)}
                                     className="w-10 h-10 rounded-lg border border-slate-200 text-xs text-slate-500 hover:border-rose-200 hover:text-rose-600"
                                     title="Obriši ocjenu"
                                   >
@@ -1439,22 +1596,268 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                                 </div>
                               </div>
 
-                              {/* Komentar */}
+                                                  <div>
+                                                    <label className="block text-xs font-semibold text-slate-700 mb-2">
+                                                      Komentar
+                                                    </label>
                               <textarea
                                 value={record.komentar}
                                 onChange={(e) =>
-                                  selectedLessonId &&
-                                  updateOcjena(
-                                    selectedLessonId,
-                                    student.id,
-                                    record.ocjena,
-                                    e.target.value,
-                                  )
+                                                        updateOcjena(lessonId, student.id, record.ocjena, e.target.value)
                                 }
                                 placeholder="Kratak komentar (opcionalno)"
                                 rows={3}
-                                className="w-full rounded-lg border border-slate-200 px-3 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white align-top"
-                              />
+                                                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                                    />
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <div className="text-sm text-slate-500 bg-slate-50 border border-dashed border-slate-200 rounded-xl px-4 py-3 text-center">
+                                        Nema dodanih lekcija. Kliknite "Dodaj lekciju" da dodate prvu.
+                                      </div>
+                                    )}
+
+                                    <div
+                                      className="relative"
+                                      ref={openLessonStudentId === student.id ? lessonDropdownRef : null}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setOpenLessonStudentId(openLessonStudentId === student.id ? null : student.id)
+                                        }
+                                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-slate-700 hover:text-blue-700 transition-colors"
+                                      >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                        </svg>
+                                        Dodaj lekciju
+                                      </button>
+
+                                      {openLessonStudentId === student.id && (
+                                        <div className="absolute left-0 right-0 top-full mt-2 rounded-xl border border-slate-200 bg-white shadow-lg z-40 w-[600px]">
+                                          <div className="p-2 border-b border-slate-200">
+                                            <div className="relative">
+                                              <svg
+                                                className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                              >
+                                                <path
+                                                  strokeLinecap="round"
+                                                  strokeLinejoin="round"
+                                                  strokeWidth={2}
+                                                  d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 104.5 4.5a7.5 7.5 0 0012.15 12.15z"
+                                                />
+                                              </svg>
+                                              <input
+                                                value={lessonInputByStudent[student.id] ?? ''}
+                                                onChange={(e) => {
+                                                  setLessonInputByStudent((prev) => ({
+                                                    ...prev,
+                                                    [student.id]: e.target.value,
+                                                  }));
+                                                }}
+                                                placeholder="Pretraži lekcije..."
+                                                className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                autoFocus
+                                              />
+                                            </div>
+                                          </div>
+                                          <div className="py-1">
+                                            {(() => {
+                                              const filterTerm = (lessonInputByStudent[student.id] || '').trim().toLowerCase();
+                                              const filteredLessons = filterTerm
+                                                ? lessons.filter((l) =>
+                                                    l.naslov.toLowerCase().includes(filterTerm) ||
+                                                    (l.tip === 'KURAN' && 'kuran'.includes(filterTerm)) ||
+                                                    (l.tip === 'SUFARA' && 'sufara'.includes(filterTerm)) ||
+                                                    (l.tip === 'ILMIHAL' && 'ilmihal'.includes(filterTerm))
+                                                  )
+                                                : lessons;
+
+                                              // Filtriraj lekcije koje su već ocijenjene (iz studentLessonStats)
+                                              const gradedLessonIds = new Set<string>();
+                                              const studentStats = studentLessonStats?.students?.[student.id];
+                                              if (studentStats?.lessons) {
+                                                studentStats.lessons.forEach((l) => {
+                                                  gradedLessonIds.add(l.lekcijaId);
+                                                });
+                                              }
+                                              
+                                              // Filtriraj lekcije koje nisu već dodane u ovom času i nisu već ocijenjene
+                                              const availableLessons = filteredLessons.filter(
+                                                (l) => !studentLessonsList.includes(l.id) && !gradedLessonIds.has(l.id)
+                                              );
+
+                                              if (availableLessons.length === 0) {
+                                                return (
+                                                  <div className="px-3 py-2 text-slate-500 text-center text-sm">
+                                                    {filterTerm ? 'Nema rezultata' : 'Sve lekcije su već dodane'}
+                                                  </div>
+                                                );
+                                              }
+
+                                              // Grupiši dostupne lekcije po tipovima
+                                              const groupedByType: {
+                                                ILMIHAL: Lesson[];
+                                                KURAN: Lesson[];
+                                                SUFARA: Lesson[];
+                                              } = {
+                                                ILMIHAL: [],
+                                                KURAN: [],
+                                                SUFARA: [],
+                                              };
+
+                                              availableLessons.forEach((l) => {
+                                                const tip = (l.tip ?? 'ILMIHAL') as 'ILMIHAL' | 'KURAN' | 'SUFARA';
+                                                groupedByType[tip].push(l);
+                                              });
+
+                                              return (
+                                                <div className="grid grid-cols-3 gap-2 p-2 max-h-[280px]">
+                                                  {/* ILMIHAL kolona */}
+                                                  <div className="flex flex-col h-[260px] border border-slate-200 rounded-lg bg-white overflow-hidden">
+                                                    <div className="flex-shrink-0 bg-slate-50 px-2 py-1.5 border-b border-slate-200">
+                                                      <h5 className="text-[10px] font-semibold text-slate-700 uppercase tracking-wide flex items-center gap-1">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                                                        Ilmihal
+                                                        <span className="ml-auto text-[9px] font-normal text-slate-500">
+                                                          ({groupedByType.ILMIHAL.length})
+                                                        </span>
+                                                      </h5>
+                                                    </div>
+                                                    <div className="flex-1 overflow-y-auto">
+                                                      <ul className="space-y-0.5 p-1.5">
+                                                        {groupedByType.ILMIHAL.length === 0 ? (
+                                                          <li className="text-[10px] text-slate-400 italic px-1.5 py-1">
+                                                            Nema
+                                                          </li>
+                                                        ) : (
+                                                          groupedByType.ILMIHAL.map((l) => (
+                                                            <li key={l.id}>
+                                                              <button
+                                                                type="button"
+                                                                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left hover:bg-slate-50 transition-colors"
+                                                                onClick={() => {
+                                                                  addLessonToStudent(student.id, l.id);
+                                                                  setLessonInputByStudent((prev) => ({
+                                                                    ...prev,
+                                                                    [student.id]: '',
+                                                                  }));
+                                                                  setOpenLessonStudentId(null);
+                                                                }}
+                                                              >
+                                                                <span className="text-[10px] text-slate-900 leading-tight truncate">
+                                                                  {l.naslov}
+                                                                </span>
+                                                              </button>
+                                                            </li>
+                                                          ))
+                                                        )}
+                                                      </ul>
+                                                    </div>
+                                                  </div>
+
+                                                  {/* KURAN kolona */}
+                                                  <div className="flex flex-col h-[260px] border border-emerald-200 rounded-lg bg-white overflow-hidden">
+                                                    <div className="flex-shrink-0 bg-emerald-50 px-2 py-1.5 border-b border-emerald-200">
+                                                      <h5 className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide flex items-center gap-1">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                                        Kuran
+                                                        <span className="ml-auto text-[9px] font-normal text-emerald-600">
+                                                          ({groupedByType.KURAN.length})
+                                                        </span>
+                                                      </h5>
+                                                    </div>
+                                                    <div className="flex-1 overflow-y-auto">
+                                                      <ul className="space-y-0.5 p-1.5">
+                                                        {groupedByType.KURAN.length === 0 ? (
+                                                          <li className="text-[10px] text-slate-400 italic px-1.5 py-1">
+                                                            Nema
+                                                          </li>
+                                                        ) : (
+                                                          groupedByType.KURAN.map((l) => (
+                                                            <li key={l.id}>
+                                                              <button
+                                                                type="button"
+                                                                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left hover:bg-emerald-50/40 transition-colors"
+                                                                onClick={() => {
+                                                                  addLessonToStudent(student.id, l.id);
+                                                                  setLessonInputByStudent((prev) => ({
+                                                                    ...prev,
+                                                                    [student.id]: '',
+                                                                  }));
+                                                                  setOpenLessonStudentId(null);
+                                                                }}
+                                                              >
+                                                                <span className="text-[10px] text-slate-900 leading-tight truncate">
+                                                                  {l.naslov}
+                                                                </span>
+                                                              </button>
+                                                            </li>
+                                                          ))
+                                                        )}
+                                                      </ul>
+                                                    </div>
+                                                  </div>
+
+                                                  {/* SUFARA kolona */}
+                                                  <div className="flex flex-col h-[260px] border border-cyan-200 rounded-lg bg-white overflow-hidden">
+                                                    <div className="flex-shrink-0 bg-cyan-50 px-2 py-1.5 border-b border-cyan-200">
+                                                      <h5 className="text-[10px] font-semibold text-cyan-700 uppercase tracking-wide flex items-center gap-1">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
+                                                        Sufara
+                                                        <span className="ml-auto text-[9px] font-normal text-cyan-600">
+                                                          ({groupedByType.SUFARA.length})
+                                                        </span>
+                                                      </h5>
+                                                    </div>
+                                                    <div className="flex-1 overflow-y-auto">
+                                                      <ul className="space-y-0.5 p-1.5">
+                                                        {groupedByType.SUFARA.length === 0 ? (
+                                                          <li className="text-[10px] text-slate-400 italic px-1.5 py-1">
+                                                            Nema
+                                                          </li>
+                                                        ) : (
+                                                          groupedByType.SUFARA.map((l) => (
+                                                            <li key={l.id}>
+                                                              <button
+                                                                type="button"
+                                                                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded text-left hover:bg-cyan-50/40 transition-colors"
+                                                                onClick={() => {
+                                                                  addLessonToStudent(student.id, l.id);
+                                                                  setLessonInputByStudent((prev) => ({
+                                                                    ...prev,
+                                                                    [student.id]: '',
+                                                                  }));
+                                                                  setOpenLessonStudentId(null);
+                                                                }}
+                                                              >
+                                                                <span className="text-[10px] text-slate-900 leading-tight truncate">
+                                                                  {l.naslov}
+                                                                </span>
+                                                              </button>
+                                                            </li>
+                                                          ))
+                                                        )}
+                                                      </ul>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })()}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
 
                               {/* Historija ocjena – accordion za nastavnu godinu */}
                               {studentLessonStats && studentLessonStats.students?.[student.id] && (
@@ -1633,6 +2036,8 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                                       </div>
                                     </div>
                                   )}
+                                </div>
+                              )}
                                 </div>
                               )}
                             </div>

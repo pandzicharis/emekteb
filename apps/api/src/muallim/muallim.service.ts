@@ -398,6 +398,14 @@ export class MuallimService {
                 ucenik: {
                   select: {
                     id: true,
+                    datumRodjenja: true,
+                    korisnik: {
+                      select: {
+                        id: true,
+                        ime: true,
+                        prezime: true,
+                      },
+                    },
                   },
                 },
               },
@@ -427,6 +435,14 @@ export class MuallimService {
           sufara: grupa.sufara,
           brojUcenika: grupa.ucenici.length,
           raspored: grupa.raspored,
+          ucenici: grupa.ucenici.map((ug) => ({
+            id: ug.ucenik.id,
+            ime: ug.ucenik.korisnik?.ime ?? null,
+            prezime: ug.ucenik.korisnik?.prezime ?? null,
+            godinaRodjenja: ug.ucenik.datumRodjenja
+              ? new Date(ug.ucenik.datumRodjenja).getFullYear()
+              : null,
+          })),
         })),
       };
     });
