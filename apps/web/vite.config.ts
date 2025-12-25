@@ -18,5 +18,9 @@ export default defineConfig({
       '@emekteb/shared-utils': path.resolve(__dirname, '../../packages/shared-utils/src'),
     },
   },
+  optimizeDeps: {
+    include: ['react-pdf', 'pdf-lib'],
+    exclude: ['@react-pdf/renderer'],
+  },
 });
 

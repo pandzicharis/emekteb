@@ -5,6 +5,11 @@ import { GradeReportDto } from './dto/grade-report.dto';
 import { StatisticsDto } from './dto/statistics.dto';
 import { ReportOptionsDto } from './dto/report-options.dto';
 import { StatusPrisustva } from '@prisma/client';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import * as fs from 'fs';
+import * as path from 'path';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 @Injectable()
 export class ReportsService {
@@ -2279,6 +2284,637 @@ export class ReportsService {
       grupe: grupeStats,
       ucenici,
     };
+  }
+
+  async getYearConclusionStudents(filters: { nastavnaGodinaId?: string }) {
+    // Get all academic years or filter by specific one
+    const nastavneGodine = await this.prisma.nastavnaGodina.findMany({
+      where: filters.nastavnaGodinaId ? { id: filters.nastavnaGodinaId } : {},
+      orderBy: { kreiran: 'desc' },
+      include: {
+        razredi: {
+          include: {
+            razred: {
+              select: {
+                id: true,
+                name: true,
+                ilmihal: true,
+              },
+            },
+            grupe: {
+              include: {
+                ucenici: {
+                  include: {
+                    ucenik: {
+                      include: {
+                        korisnik: {
+                          select: {
+                            ime: true,
+                            prezime: true,
+                            fotografija: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Format response: group by academic year, then by razred, then list students
+    return nastavneGodine.map((ng) => ({
+      id: ng.id,
+      naziv: ng.naziv,
+      opis: ng.opis,
+      datumOd: ng.datumOd,
+      datumDo: ng.datumDo,
+      status: ng.status,
+      razredi: ng.razredi.map((rng) => {
+        // Get unique students from all grupe in this razred
+        const ucenikSet = new Map<string, any>();
+        rng.grupe.forEach((grupa) => {
+          grupa.ucenici.forEach((ug) => {
+            if (!ucenikSet.has(ug.ucenik.id)) {
+              ucenikSet.set(ug.ucenik.id, {
+                id: ug.ucenik.id,
+                ime: ug.ucenik.korisnik?.ime || '',
+                prezime: ug.ucenik.korisnik?.prezime || '',
+                fotografija: ug.ucenik.korisnik?.fotografija || null,
+              });
+            }
+          });
+        });
+
+        return {
+          id: rng.id,
+          razred: {
+            id: rng.razred.id,
+            name: rng.razred.name,
+            ilmihal: rng.razred.ilmihal,
+          },
+          ucenici: Array.from(ucenikSet.values()).sort((a, b) => {
+            const prezimeCompare = a.prezime.localeCompare(b.prezime);
+            if (prezimeCompare !== 0) return prezimeCompare;
+            return a.ime.localeCompare(b.ime);
+          }),
+        };
+      }),
+    }));
+  }
+
+  async getStudentYearConclusionData(ucenikId: string, nastavnaGodinaId: string) {
+    // Get student basic info
+    const ucenik = await this.prisma.ucenik.findUnique({
+      where: { id: ucenikId },
+      include: {
+        korisnik: {
+          select: {
+            ime: true,
+            prezime: true,
+            fotografija: true,
+          },
+        },
+        obrazovanje: true,
+        roditelji: true,
+        kontakti: true,
+      },
+    });
+
+    if (!ucenik) {
+      throw new BadRequestException('Učenik nije pronađen');
+    }
+
+    // Get academic year info
+    const nastavnaGodina = await this.prisma.nastavnaGodina.findUnique({
+      where: { id: nastavnaGodinaId },
+      include: {
+        nastavniPlan: {
+          select: {
+            id: true,
+            naziv: true,
+          },
+        },
+      },
+    });
+
+    if (!nastavnaGodina) {
+      throw new BadRequestException('Nastavna godina nije pronađena');
+    }
+
+    // Get student's attendance data for this academic year
+    const attendanceData = await this.getAttendanceReport({
+      ucenikId,
+      nastavnaGodinaId,
+    });
+
+    // Get student's grade data for this academic year
+    const gradeData = await this.getGradeReport({
+      ucenikId,
+      nastavnaGodinaId,
+    });
+
+    // Get student's detailed stats
+    const studentStats = await this.getUcenikStats({
+      ucenikId,
+      nastavnaGodinaId,
+    });
+
+    // Check if student is in Hifz school
+    const skolaHifzaUcenik = await this.prisma.skolaHifzaUcenik.findFirst({
+      where: {
+        ucenikId,
+        skolaHifza: {
+          nastavnaGodinaId,
+        },
+      },
+      include: {
+        skolaHifza: {
+          include: {
+            nastavnaGodina: {
+              select: {
+                id: true,
+                naziv: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Get Hifz attendance if applicable
+    let hifzAttendance = null;
+    if (skolaHifzaUcenik) {
+      const hifzPrisustva = await this.prisma.skolaHifzaPrisustvo.findMany({
+        where: {
+          ucenikId,
+          cas: {
+            skolaHifzaId: skolaHifzaUcenik.skolaHifzaId,
+          },
+        },
+        include: {
+          cas: {
+            select: {
+              id: true,
+              datum: true,
+            },
+          },
+        },
+        orderBy: {
+          cas: {
+            datum: 'desc',
+          },
+        },
+      });
+
+      const hifzTotal = hifzPrisustva.length;
+      const hifzPrisutni = hifzPrisustva.filter((p) => p.status === StatusPrisustva.PRISUTAN).length;
+      const hifzProcenat = hifzTotal > 0 ? Math.round((hifzPrisutni / hifzTotal) * 100 * 100) / 100 : 0;
+
+      hifzAttendance = {
+        total: hifzTotal,
+        prisutni: hifzPrisutni,
+        procenat: hifzProcenat,
+        napredak: skolaHifzaUcenik.napredak,
+      };
+    }
+
+    // Get which razred/grupa the student was in
+    const ucenikGrupe = await this.prisma.ucenikGrupa.findMany({
+      where: {
+        ucenikId,
+        grupa: {
+          razredNastavnaGodina: {
+            nastavnaGodinaId,
+          },
+        },
+      },
+      include: {
+        grupa: {
+          include: {
+            razredNastavnaGodina: {
+              include: {
+                razred: {
+                  select: {
+                    id: true,
+                    name: true,
+                    ilmihal: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return {
+      ucenik: {
+        id: ucenik.id,
+        ime: ucenik.korisnik?.ime || '',
+        prezime: ucenik.korisnik?.prezime || '',
+        fotografija: ucenik.korisnik?.fotografija || null,
+        datumRodjenja: ucenik.datumRodjenja,
+        spol: ucenik.spol,
+        mjestoRodjenja: ucenik.mjestoRodjenja,
+        adresaStanovanja: ucenik.adresaStanovanja,
+        obrazovanje: ucenik.obrazovanje,
+        roditelji: ucenik.roditelji,
+        kontakti: ucenik.kontakti,
+      },
+      nastavnaGodina: {
+        id: nastavnaGodina.id,
+        naziv: nastavnaGodina.naziv,
+        opis: nastavnaGodina.opis,
+        datumOd: nastavnaGodina.datumOd,
+        datumDo: nastavnaGodina.datumDo,
+        nastavniPlan: nastavnaGodina.nastavniPlan,
+      },
+      razredi: ucenikGrupe.map((ug) => ({
+        razred: ug.grupa.razredNastavnaGodina.razred,
+        grupa: {
+          id: ug.grupa.id,
+          naziv: ug.grupa.naziv,
+        },
+      })),
+      attendance: attendanceData,
+      grades: gradeData,
+      stats: studentStats,
+      hifz: skolaHifzaUcenik
+        ? {
+            ucenik: skolaHifzaUcenik,
+            attendance: hifzAttendance,
+          }
+        : null,
+    };
+  }
+
+  async generateStudentReportPDF(ucenikId: string, nastavnaGodinaId: string, customComments?: Record<string, string>): Promise<Buffer> {
+    const data = await this.getStudentYearConclusionData(ucenikId, nastavnaGodinaId);
+    
+    // Create PDF document (A4 size)
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    let yPosition = 20;
+
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(59, 130, 246); // indigo-600
+    doc.text('IZVJEŠTAJ O UČENIKU', pageWidth / 2, yPosition, { align: 'center' });
+    yPosition += 10;
+
+    // Student Information
+    doc.setFontSize(14);
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${data.ucenik.ime} ${data.ucenik.prezime}`, pageWidth / 2, yPosition, { align: 'center' });
+    yPosition += 8;
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Nastavna godina: ${data.nastavnaGodina.naziv}`, 20, yPosition);
+    yPosition += 6;
+    
+    if (data.razredi.length > 0) {
+      doc.text(`Razred: ${data.razredi.map((r: any) => r.razred.name).join(', ')}`, 20, yPosition);
+      yPosition += 6;
+    }
+
+    if (data.ucenik.datumRodjenja) {
+      const datumRodjenja = new Date(data.ucenik.datumRodjenja).toLocaleDateString('bs-BA');
+      doc.text(`Datum rođenja: ${datumRodjenja}`, 20, yPosition);
+      yPosition += 6;
+    }
+
+    yPosition += 5;
+
+    // Attendance Statistics
+    const attendanceData = data.attendance?.summaryByStudent?.[0] || {
+      total: 0,
+      prisutni: 0,
+      opravdani: 0,
+      neopravdani: 0,
+      procenatPrisustva: 0,
+    };
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Prisustvo', 20, yPosition);
+    yPosition += 8;
+
+    const attendanceTableData = [
+      ['Ukupno časova', attendanceData.total.toString()],
+      ['Prisutni', attendanceData.prisutni.toString()],
+      ['Opravdani', attendanceData.opravdani.toString()],
+      ['Neopravdani', attendanceData.neopravdani.toString()],
+      ['Procenat prisustva', `${attendanceData.procenatPrisustva}%`],
+    ];
+
+    autoTable(doc, {
+      startY: yPosition,
+      head: [['Kategorija', 'Vrijednost']],
+      body: attendanceTableData,
+      theme: 'striped',
+      headStyles: { fillColor: [59, 130, 246] },
+      margin: { left: 20, right: 20 },
+    });
+
+    yPosition = (doc as any).lastAutoTable.finalY + 10;
+
+    // Grade Statistics
+    const gradeStats = data.grades?.statistics || { total: 0, prosjek: 0, distribucija: {} };
+    
+    if (yPosition > pageHeight - 40) {
+      doc.addPage();
+      yPosition = 20;
+    }
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Ocjene', 20, yPosition);
+    yPosition += 8;
+
+    const gradeTableData = [
+      ['Ukupno ocjena', gradeStats.total.toString()],
+      ['Prosječna ocjena', gradeStats.prosjek?.toFixed(2) || '0.00'],
+    ];
+
+    // Add grade distribution
+    const distribucija = gradeStats.distribucija || {};
+    Object.entries(distribucija).forEach(([grade, count]) => {
+      gradeTableData.push([`Ocjena ${grade}`, (count as number).toString()]);
+    });
+
+    autoTable(doc, {
+      startY: yPosition,
+      head: [['Kategorija', 'Vrijednost']],
+      body: gradeTableData,
+      theme: 'striped',
+      headStyles: { fillColor: [16, 185, 129] }, // green-500
+      margin: { left: 20, right: 20 },
+    });
+
+    yPosition = (doc as any).lastAutoTable.finalY + 10;
+
+    // Lesson Progress
+    const stats = data.stats || {};
+    if (yPosition > pageHeight - 40) {
+      doc.addPage();
+      yPosition = 20;
+    }
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Progres lekcija', 20, yPosition);
+    yPosition += 8;
+
+    const progressTableData = [
+      ['Ukupno lekcija', (stats.ukupnoLekcija || 0).toString()],
+      ['Ocjenjeno lekcija', (stats.ocjenjenoLekcija || 0).toString()],
+      ['Procenat', `${stats.postotakPredjenogGradiva || 0}%`],
+    ];
+
+    autoTable(doc, {
+      startY: yPosition,
+      head: [['Kategorija', 'Vrijednost']],
+      body: progressTableData,
+      theme: 'striped',
+      headStyles: { fillColor: [139, 92, 246] }, // purple-500
+      margin: { left: 20, right: 20 },
+    });
+
+    yPosition = (doc as any).lastAutoTable.finalY + 10;
+
+    // Comments
+    if (customComments && Object.keys(customComments).length > 0) {
+      if (yPosition > pageHeight - 50) {
+        doc.addPage();
+        yPosition = 20;
+      }
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Komentari i napomene', 20, yPosition);
+      yPosition += 8;
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      Object.entries(customComments).forEach(([key, value]) => {
+        if (value) {
+          const lines = doc.splitTextToSize(value, pageWidth - 40);
+          doc.text(lines, 20, yPosition);
+          yPosition += lines.length * 5;
+        }
+      });
+    }
+
+    // Footer
+    const totalPages = doc.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(128, 128, 128);
+      doc.text(
+        `Stranica ${i} od ${totalPages} - ${data.nastavnaGodina.naziv}`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: 'center' }
+      );
+    }
+
+    // Return PDF as Buffer
+    const pdfBuffer = Buffer.from(doc.output('arraybuffer'));
+    return pdfBuffer;
+  }
+
+  async generateDiplomaPDF(ucenikId: string, nastavnaGodinaId: string, diplomaData: {
+    imePrezime: string;
+    nivo: string;
+    datum: string;
+    godina: string;
+  }): Promise<Buffer> {
+    try {
+      // Load the template PDF
+      // In Docker: working_dir is /app/apps/api, so we need to go up to /app
+      // Try multiple possible paths
+      const possiblePaths = [
+        path.join(process.cwd(), '..', '..', 'pdf', 'ILMIHAL.pdf'), // /app/pdf/ILMIHAL.pdf from /app/apps/api
+        path.join(process.cwd(), '..', 'pdf', 'ILMIHAL.pdf'),
+        path.join(process.cwd(), 'pdf', 'ILMIHAL.pdf'),
+        path.join(process.cwd(), '..', '..', 'apps', 'web', 'public', 'ILMIHAL.pdf'), // /app/apps/web/public/ILMIHAL.pdf
+        path.join(__dirname, '..', '..', '..', '..', 'pdf', 'ILMIHAL.pdf'),
+      ];
+      
+      let templatePath = possiblePaths.find(p => fs.existsSync(p));
+      
+      if (!templatePath) {
+        // Fallback: try to find it relative to workspace root
+        templatePath = path.join(process.cwd(), 'pdf', 'ILMIHAL.pdf');
+      }
+      
+      if (!templatePath || !fs.existsSync(templatePath)) {
+        console.error('PDF template not found. Tried paths:', possiblePaths);
+        console.error('Current working directory:', process.cwd());
+        throw new BadRequestException(`PDF template not found. Searched in: ${possiblePaths.join(', ')}`);
+      }
+
+      const templateBytes = fs.readFileSync(templatePath);
+      const pdfDoc = await PDFDocument.load(templateBytes);
+
+      // Get the first page
+      const pages = pdfDoc.getPages();
+      const firstPage = pages[0];
+      const { width, height } = firstPage.getSize();
+
+      // Try to get form fields first
+      try {
+        const form = pdfDoc.getForm();
+        const fields = form.getFields();
+        
+        if (fields.length > 0) {
+          // Map fields based on actual PDF field names
+          const fieldMapping: Record<string, string> = {
+            'ime_prezime': diplomaData.imePrezime,
+            'nivo': diplomaData.nivo,
+            'datum': (() => {
+              const dateObj = new Date(diplomaData.datum);
+              return dateObj.toLocaleDateString('bs-BA', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+              });
+            })(),
+            'nastavna_godina': diplomaData.godina,
+          };
+
+          // Try to find and fill form fields
+          const allFields = form.getFields();
+          for (const field of allFields) {
+            const fieldName = field.getName();
+            
+            // Try exact match
+            if (fieldMapping[fieldName]) {
+              try {
+                const textField = form.getTextField(fieldName);
+                textField.setText(fieldMapping[fieldName]);
+              } catch (e) {
+                // Field type mismatch, continue
+              }
+            }
+            
+            // Try variations
+            if (fieldName.includes('ime') || fieldName.includes('name')) {
+              try {
+                const textField = form.getTextField(fieldName);
+                textField.setText(diplomaData.imePrezime);
+              } catch (e) {
+                // Skip
+              }
+            } else if (fieldName.includes('nivo') || fieldName.includes('level')) {
+              try {
+                const textField = form.getTextField(fieldName);
+                textField.setText(diplomaData.nivo);
+              } catch (e) {
+                // Skip
+              }
+            } else if (fieldName.includes('datum') || fieldName.includes('date')) {
+              try {
+                const textField = form.getTextField(fieldName);
+                const dateObj = new Date(diplomaData.datum);
+                const formattedDate = dateObj.toLocaleDateString('bs-BA', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric',
+                });
+                textField.setText(formattedDate);
+              } catch (e) {
+                // Skip
+              }
+            } else if (fieldName.includes('nastavna_godina') || fieldName.includes('godina') || fieldName.includes('year')) {
+              try {
+                const textField = form.getTextField(fieldName);
+                textField.setText(diplomaData.godina);
+              } catch (e) {
+                // Skip
+              }
+            }
+          }
+
+          // Save and return
+          const pdfBytes = await pdfDoc.save();
+          return Buffer.from(pdfBytes);
+        }
+      } catch (formError) {
+        // PDF doesn't have form fields, use drawText method
+        console.log('PDF does not have form fields, using drawText method');
+      }
+
+      // Fallback: Draw text on the PDF using coordinates
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+      // Calculate text width for centering name
+      const textSize = 14;
+      const textWidth = boldFont.widthOfTextAtSize(diplomaData.imePrezime, textSize);
+      const centeredX = (width - textWidth) / 2;
+
+      // Draw text (coordinates need to be adjusted based on actual PDF)
+      // These are placeholder coordinates
+      firstPage.drawText(diplomaData.imePrezime, {
+        x: centeredX,
+        y: height - 200, // Adjust based on actual PDF
+        size: textSize,
+        font: boldFont,
+        color: rgb(0, 0, 0),
+      });
+
+      firstPage.drawText(diplomaData.nivo, {
+        x: width / 2 - 50, // Adjust based on actual PDF
+        y: height - 250,
+        size: 12,
+        font: font,
+        color: rgb(0, 0, 0),
+      });
+
+      const dateObj = new Date(diplomaData.datum);
+      const formattedDate = dateObj.toLocaleDateString('bs-BA', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+
+      firstPage.drawText(formattedDate, {
+        x: width / 2 - 50,
+        y: height - 300,
+        size: 12,
+        font: font,
+        color: rgb(0, 0, 0),
+      });
+
+      firstPage.drawText(diplomaData.godina, {
+        x: width / 2 - 50,
+        y: height - 350,
+        size: 12,
+        font: font,
+        color: rgb(0, 0, 0),
+      });
+
+      // Save and return
+      const pdfBytes = await pdfDoc.save();
+      return Buffer.from(pdfBytes);
+    } catch (error) {
+      console.error('Error generating diploma PDF:', error);
+      throw new BadRequestException('Greška pri generisanju diplome');
+    }
   }
 }
 
