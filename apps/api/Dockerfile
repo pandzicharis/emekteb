@@ -1,28 +1,21 @@
-FROM node:20-slim
-
-# Install OpenSSL for Prisma, procps for ps command, postgresql-client for db checks, and wget for healthchecks
-RUN apt-get update && apt-get install -y openssl procps postgresql-client wget && rm -rf /var/lib/apt/lists/*
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
+# Install OpenSSL for Prisma, wget for healthchecks, and postgresql-client for database checks
+RUN apk add --no-cache openssl wget postgresql-client
+
+# Kopiraj root i workspace package.json
 COPY package*.json ./
 COPY apps/api/package*.json ./apps/api/
 COPY packages/shared-types/package.json ./packages/shared-types/
 COPY packages/shared-utils/package.json ./packages/shared-utils/
 
-# Install dependencies
-RUN npm ci
+RUN npm install
 
-# Copy source code
 COPY . .
 
-# Generate Prisma Client (after copying all files to ensure latest schema)
-# This ensures Prisma client is generated with the latest schema
+# Generate Prisma Client
 RUN cd apps/api && npx prisma generate
 
-# Expose port
 EXPOSE 3000
-
-# Start with hot reload (will be overridden by docker-compose)
-CMD ["sh", "-c", "cd /app/apps/api && npx nest start --watch"]

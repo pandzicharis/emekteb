@@ -12,9 +12,10 @@ import { NastavnaGodinaModule } from './nastavna-godina/nastavna-godina.module';
 import { CasModule } from './cas/cas.module';
 import { UcenikModule } from './ucenik/ucenik.module';
 import { SkolaHifzaModule } from './skola-hifza/skola-hifza.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
-  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule, CasModule, UcenikModule, SkolaHifzaModule],
+  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule, CasModule, UcenikModule, SkolaHifzaModule, ReportsModule],
   controllers: [AppController],
   providers: [AppService],
 })

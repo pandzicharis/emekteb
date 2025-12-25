@@ -2,17 +2,25 @@
 set -e
 
 echo "🔄 Waiting for database to be ready..."
-MAX_RETRIES=30
+MAX_RETRIES=60
 RETRY_COUNT=0
 
+# Wait a bit for postgres to fully start
+sleep 3
+
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-  # Try to connect using psql (postgresql-client is installed in Dockerfile)
-  if PGPASSWORD=postgres psql -h postgres -U postgres -d emekteb -c "SELECT 1" > /dev/null 2>&1; then
-    echo "✅ Database is ready!"
-    break
+  # Try to connect using pg_isready first (faster check)
+  if pg_isready -h postgres -p 5432 -U postgres > /dev/null 2>&1; then
+    # Then try actual connection with psql
+    if PGPASSWORD=postgres psql -h postgres -p 5432 -U postgres -d emekteb -c "SELECT 1" > /dev/null 2>&1; then
+      echo "✅ Database is ready!"
+      break
+    fi
   fi
   RETRY_COUNT=$((RETRY_COUNT + 1))
-  echo "⏳ Database is unavailable - sleeping (attempt $RETRY_COUNT/$MAX_RETRIES)"
+  if [ $((RETRY_COUNT % 5)) -eq 0 ]; then
+    echo "⏳ Database is unavailable - sleeping (attempt $RETRY_COUNT/$MAX_RETRIES)"
+  fi
   sleep 2
 done
 

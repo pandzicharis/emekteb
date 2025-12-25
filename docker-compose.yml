@@ -13,10 +13,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U postgres -d emekteb"]
+      interval: 3s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 10s
     networks:
       - emekteb-network
 
@@ -91,7 +92,6 @@ services:
         condition: service_healthy
     networks:
       - emekteb-network
-    command: npm run dev --workspace=@emekteb/web -- --host 0.0.0.0
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5173 || exit 1"]
       interval: 10s

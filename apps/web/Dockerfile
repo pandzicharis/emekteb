@@ -12,14 +12,18 @@ COPY packages/shared-types/package.json ./packages/shared-types/
 COPY packages/shared-utils/package.json ./packages/shared-utils/
 
 # Install dependencies
-RUN npm ci
+RUN npm install
 
 # Copy source code
 COPY . .
 
+# Copy and make entrypoint script executable
+COPY apps/web/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Expose port
 EXPOSE 5173
 
-# Start dev server with hot reload
-CMD ["npm", "run", "dev", "--workspace=@emekteb/web"]
+# Use entrypoint script
+ENTRYPOINT ["/docker-entrypoint.sh"]
 
