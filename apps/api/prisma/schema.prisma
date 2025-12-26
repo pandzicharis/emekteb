@@ -65,6 +65,9 @@ model Ucenik {
     // Greške pri importu
     greske Json? // JSON sa greškama za svako polje
 
+    // Napredak učenika po nastavnim godinama
+    napredak Json? // JSON: { [nastavnaGodinaId]: { razred: string, pohvaleIPriznanja: string[], sufaraLekcije: string[], skolaHifzaNapredak: { [suraName]: number[] } | null } }
+
     // Porodični podaci
     imaRoditelje        String? // "Oba", "Majke", "Oca", itd.
     roditeljiZajedno    String? // "Da", "Ne"

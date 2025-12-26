@@ -3,11 +3,21 @@ import axios from 'axios';
 
 type NastavniPlan = { id: string; naziv: string };
 
+type UcenikNapredak = {
+  [nastavnaGodinaId: string]: {
+    razred: string;
+    pohvaleIPriznanja: string[];
+    sufaraLekcije?: string[];
+    skolaHifzaNapredak?: { [suraName: string]: number[] } | null;
+  };
+};
+
 type Ucenik = {
   id: string;
   ime: string;
   prezime: string;
   email?: string;
+  napredak?: UcenikNapredak;
 };
 
 type Muallim = {
@@ -1187,12 +1197,12 @@ export default function SetupNastavnaGodinaPage() {
               <span className={`text-sm font-semibold ${
                 step === s.id ? 'text-gray-900' : step > s.id ? 'text-gray-700' : 'text-gray-400'
               }`}>{s.label}</span>
-              {idx < steps.length - 1 && (
-                <div className={`h-px w-16 mt-2 ${
-                  step > s.id ? 'bg-green-300' : 'bg-gray-300'
-                }`} />
-              )}
             </div>
+            {idx < steps.length - 1 && (
+              <div className={`h-0.5 w-16 ${
+                step > s.id ? 'bg-green-300' : 'bg-gray-300'
+              }`} />
+            )}
           </div>
         ))}
       </div>
@@ -1477,6 +1487,43 @@ export default function SetupNastavnaGodinaPage() {
       selectedIds: Array.from(selected).slice(0, 5)
     });
     
+    // Calculate previous razred for recommendation
+    const currentRazredId = entry?.razredId ?? getRazredId(razred);
+    const previousRazredNum = razred > 0 ? razred - 1 : null;
+    const previousRazredId = previousRazredNum !== null ? getRazredId(previousRazredNum) : null;
+    
+    // Helper function to get student's previous razred info
+    const getStudentPreviousRazredInfo = (ucenik: Ucenik): { isRecommended: boolean; previousRazredInfo: { razredNum: number; nastavnaGodinaId: string; nastavnaGodinaNaziv?: string } | null } => {
+      if (!ucenik.napredak || !previousRazredId) {
+        return { isRecommended: false, previousRazredInfo: null };
+      }
+      
+      // Find the latest nastavna godina where student has progress with previous razred
+      const napredakEntries = Object.entries(ucenik.napredak);
+      if (napredakEntries.length === 0) {
+        return { isRecommended: false, previousRazredInfo: null };
+      }
+      
+      // Sort by nastavna godina ID (assuming newer ones have later IDs or we can check dates)
+      // For now, check all entries and find ones matching previous razred
+      for (const [nastavnaGodinaId, napredakData] of napredakEntries) {
+        if (napredakData.razred === previousRazredId) {
+          // Find nastavna godina info to get name
+          const godinaInfo = godine.find(g => g.id === nastavnaGodinaId);
+          return {
+            isRecommended: true,
+            previousRazredInfo: {
+              razredNum: previousRazredNum!,
+              nastavnaGodinaId,
+              nastavnaGodinaNaziv: godinaInfo?.naziv,
+            },
+          };
+        }
+      }
+      
+      return { isRecommended: false, previousRazredInfo: null };
+    };
+    
     // Za read-only mod, prikaži sve odabrane učenike (čak i ako su "zauzeti" u drugim razredima)
     // Za edit mod, filtriraj normalno
     const availableUcenici = isReadOnly
@@ -1492,6 +1539,15 @@ export default function SetupNastavnaGodinaPage() {
           if (!include) console.log('❌ [RENDER] Učenik isključen:', u.id, u.ime, u.prezime, { notOccupied, inSelected });
           return include;
         }); // Normalno filtriranje u edit modu
+    
+    // Sort available students: recommended first, then others
+    const sortedAvailableUcenici = [...availableUcenici].sort((a, b) => {
+      const aInfo = getStudentPreviousRazredInfo(a);
+      const bInfo = getStudentPreviousRazredInfo(b);
+      if (aInfo.isRecommended && !bInfo.isRecommended) return -1;
+      if (!aInfo.isRecommended && bInfo.isRecommended) return 1;
+      return 0;
+    });
     
     console.log('✅ [RENDER] availableUcenici:', {
       length: availableUcenici.length,
@@ -1568,31 +1624,52 @@ export default function SetupNastavnaGodinaPage() {
                 </div>
               ) : (
               <div className="space-y-1">
-                {availableUcenici.map((u) => {
+                {sortedAvailableUcenici.map((u) => {
                   const isSelected = selected.has(u.id);
+                  const { isRecommended, previousRazredInfo } = getStudentPreviousRazredInfo(u);
                   return (
                     <label
                       key={u.id}
                       className={`flex items-center justify-between px-3 py-2 rounded cursor-pointer transition-colors ${
-                        isSelected ? 'bg-green-50 border border-green-200' : 'hover:bg-gray-50'
+                        isSelected 
+                          ? 'bg-green-50 border border-green-200' 
+                          : isRecommended
+                          ? 'bg-blue-50 border border-blue-200 hover:bg-blue-100'
+                          : 'hover:bg-gray-50'
                       }`}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleStudent(razred, u.id)}
-                          className="h-4 w-4 text-green-600 accent-green-600 focus:ring-green-500 border-gray-300 rounded"
+                          className="h-4 w-4 text-green-600 accent-green-600 focus:ring-green-500 border-gray-300 rounded flex-shrink-0"
                         />
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900">
-                            {u.ime} {u.prezime}
-                          </p>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold text-gray-900">
+                              {u.ime} {u.prezime}
+                            </p>
+                            {isRecommended && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 text-[10px] font-semibold">
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                </svg>
+                                Preporučeno
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-gray-500 font-medium">{u.email}</p>
+                          {previousRazredInfo && (
+                            <p className="text-xs text-blue-600 font-medium mt-0.5">
+                              Prethodno: {labelGrupa(previousRazredInfo.razredNum)}
+                              {previousRazredInfo.nastavnaGodinaNaziv && ` (${previousRazredInfo.nastavnaGodinaNaziv})`}
+                            </p>
+                          )}
                         </div>
                       </div>
                       {isSelected && (
-                        <span className="text-xs text-green-700 font-semibold">Odabrano</span>
+                        <span className="text-xs text-green-700 font-semibold flex-shrink-0">Odabrano</span>
                       )}
                     </label>
                   );
@@ -1646,18 +1723,25 @@ export default function SetupNastavnaGodinaPage() {
                       console.log('⚠️ [RENDER] Učenik nije pronađen u allUcenici:', ucenikId);
                       return null;
                     }
+                    const { previousRazredInfo } = getStudentPreviousRazredInfo(u);
                     return (
                       <div
                         key={ucenikId}
                         className="flex items-center justify-between px-3 py-2 rounded bg-gray-50 border border-gray-200"
                       >
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-900">
                             {u.ime} {u.prezime}
                           </p>
                           <p className="text-xs text-gray-500 font-medium">{u.email}</p>
+                          {previousRazredInfo && (
+                            <p className="text-xs text-blue-600 font-medium mt-0.5">
+                              Prethodno: {labelGrupa(previousRazredInfo.razredNum)}
+                              {previousRazredInfo.nastavnaGodinaNaziv && ` (${previousRazredInfo.nastavnaGodinaNaziv})`}
+                            </p>
+                          )}
                         </div>
-                        <span className="text-xs text-green-700 font-semibold">Odabrano</span>
+                        <span className="text-xs text-green-700 font-semibold flex-shrink-0">Odabrano</span>
                       </div>
                     );
                   })}
@@ -2735,8 +2819,8 @@ const renderTimelineSchedule = (
   };
 
   const renderStep3 = () => (
-    <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4">
-      <div className="space-y-4">
+    <div className="grid grid-cols-1 lg:grid-cols-10 gap-4">
+      <div className="lg:col-span-7 space-y-4">
         {data.korak2.razredi.length === 0 && (
           <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-900 font-medium">
             Prvo odaberite razrede u prethodnom koraku.
@@ -3283,7 +3367,7 @@ const renderTimelineSchedule = (
         );
       })}
       </div>
-      <div className="space-y-4">
+      <div className="lg:col-span-3 space-y-4">
         {renderOccupiedSlotsPanel(expandedRazred ?? undefined)}
       </div>
     </div>

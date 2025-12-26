@@ -113,8 +113,8 @@ export default function StudentReportView({ studentId, nastavnaGodinaId, razredI
 
   return (
     <div className="space-y-6">
-      {/* Student Header */}
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg p-6 text-white">
+      {/* Student Header - Sticky */}
+      <div className="sticky top-0 z-10 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg p-6 text-white shadow-lg">
         <div className="flex items-center gap-4">
           {data.ucenik.fotografija ? (
             <img
@@ -135,7 +135,7 @@ export default function StudentReportView({ studentId, nastavnaGodinaId, razredI
             <p className="text-indigo-100">{data.nastavnaGodina.naziv}</p>
             {data.razredi.length > 0 && (
               <p className="text-indigo-100 text-sm">
-                {data.razredi.map((r: any) => r.razred.name).join(', ')}
+                Razred: {data.razredi.map((r: any) => r.razred.name).join(', ')}
               </p>
             )}
           </div>

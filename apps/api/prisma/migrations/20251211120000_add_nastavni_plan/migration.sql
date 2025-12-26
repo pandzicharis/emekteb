@@ -29,14 +29,3 @@ ALTER TABLE "nastavni_plan_razredi" ADD CONSTRAINT "nastavni_plan_razredi_nastav
 
 -- AddForeignKey
 ALTER TABLE "nastavni_plan_razredi" ADD CONSTRAINT "nastavni_plan_razredi_razredId_fkey" FOREIGN KEY ("razredId") REFERENCES "razredi"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
-
-
-
-
-
-
-
-
-
-

@@ -13,15 +13,3 @@ CREATE TABLE "razredi" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "razredi_name_key" ON "razredi"("name");
-
-
-
-
-
-
-
-
-
-
-
-

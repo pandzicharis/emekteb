@@ -10,35 +10,6 @@ export default function StudentInfoStep({ studentData }: StudentInfoStepProps) {
 
   return (
     <div className="space-y-6">
-      {/* Student Header */}
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg p-6 text-white">
-        <div className="flex items-center gap-4">
-          {ucenik.fotografija ? (
-            <img
-              src={`${API_URL}${ucenik.fotografija}`}
-              alt={`${ucenik.ime} ${ucenik.prezime}`}
-              className="w-20 h-20 rounded-full object-cover border-4 border-white"
-            />
-          ) : (
-            <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center text-2xl font-bold border-4 border-white">
-              {ucenik.ime.charAt(0).toUpperCase()}
-              {ucenik.prezime.charAt(0).toUpperCase()}
-            </div>
-          )}
-          <div>
-            <h2 className="text-2xl font-bold">
-              {ucenik.ime} {ucenik.prezime}
-            </h2>
-            <p className="text-indigo-100 mt-1">{nastavnaGodina.naziv}</p>
-            {studentData.razredi.length > 0 && (
-              <p className="text-indigo-100 text-sm mt-1">
-                {studentData.razredi.map((r: any) => r.razred.name).join(', ')}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Basic Information */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white border border-gray-200 rounded-lg p-6">

@@ -205,9 +205,9 @@ export default function FinalReviewStep({
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-lg p-6 text-white">
-        <h2 className="text-2xl font-bold mb-2">Finalni pregled</h2>
-        <p className="text-indigo-100">
+      <div className="border-b border-gray-200 pb-4 mb-6">
+        <h2 className="text-xl font-semibold text-gray-900 mb-1">Finalni pregled</h2>
+        <p className="text-sm text-gray-600">
           Pregledajte sve podatke prije generisanja dokumenata
         </p>
       </div>

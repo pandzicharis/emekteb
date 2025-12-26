@@ -118,9 +118,24 @@ export class ReportsController {
 
       res.setHeader('Content-Disposition', `attachment; filename="diploma_${body.ucenikId}.pdf"`);
       res.send(pdfBuffer);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error in generateDiploma controller:', error);
-      throw error;
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        errorType: error?.constructor?.name,
+        statusCode: error?.status || error?.statusCode || (error instanceof Error && 'getStatus' in error ? (error as any).getStatus() : undefined),
+      });
+      
+      // If using @Res(), we need to manually send error response
+      const errorMessage = error instanceof Error ? error.message : 'Greška pri generisanju diplome';
+      const statusCode = error?.status || error?.statusCode || (error instanceof Error && 'getStatus' in error ? (error as any).getStatus() : 400);
+      
+      res.status(statusCode).json({
+        message: errorMessage,
+        error: 'Bad Request',
+        statusCode: statusCode,
+      });
     }
   }
 }

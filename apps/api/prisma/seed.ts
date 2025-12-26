@@ -1,4 +1,4 @@
-import { PrismaClient, Uloga, Ilmihal, TipLekcije } from '@prisma/client';
+import { PrismaClient, Uloga, Ilmihal, TipLekcije, DanUNedelji, TipCasa, StatusPrisustva, Spol, StatusUcenika } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -328,15 +328,752 @@ async function main() {
     }
   }
 
+  // ============================================
+  // 5. KREIRANJE DODATNIH MUALLIMA
+  // ============================================
+  console.log('👨‍🏫 Kreiranje dodatnih muallima...\n');
+
+  const muallimiData = [
+    { ime: 'Ahmed', prezime: 'Hasanović', email: 'ahmed.hasanovic@emekteb.ba', pin: '1111' },
+    { ime: 'Fatima', prezime: 'Mehmedović', email: 'fatima.mehmedovic@emekteb.ba', pin: '2222' },
+    { ime: 'Emir', prezime: 'Alić', email: 'emir.alic@emekteb.ba', pin: '3333' },
+    { ime: 'Amina', prezime: 'Kovačević', email: 'amina.kovacevic@emekteb.ba', pin: '4444' },
+    { ime: 'Haris', prezime: 'Džafić', email: 'haris.dzafic@emekteb.ba', pin: '5555' },
+    { ime: 'Lejla', prezime: 'Begić', email: 'lejla.begic@emekteb.ba', pin: '6666' },
+    { ime: 'Adnan', prezime: 'Suljić', email: 'adnan.suljic@emekteb.ba', pin: '7777' },
+    { ime: 'Emina', prezime: 'Hadžić', email: 'emina.hadzic@emekteb.ba', pin: '8888' },
+    { ime: 'Dženan', prezime: 'Osmanović', email: 'dzenan.osmanovic@emekteb.ba', pin: '9999' },
+  ];
+
+  const kreiraniMuallimi = [muallim]; // Dodaj postojećeg muallima
+
+  for (const muallimData of muallimiData) {
+    const noviMuallim = await prisma.korisnik.upsert({
+      where: { email: muallimData.email },
+      update: {
+        lozinka: hashedPassword,
+        ime: muallimData.ime,
+        prezime: muallimData.prezime,
+        uloga: Uloga.MUALLIM,
+        aktivan: true,
+        pin: muallimData.pin,
+      },
+      create: {
+        email: muallimData.email,
+        lozinka: hashedPassword,
+        ime: muallimData.ime,
+        prezime: muallimData.prezime,
+        uloga: Uloga.MUALLIM,
+        aktivan: true,
+        pin: muallimData.pin,
+      },
+    });
+
+    // Kreiraj Ucenik zapis za muallima
+    await prisma.ucenik.upsert({
+      where: { korisnikId: noviMuallim.id },
+      update: {},
+      create: {
+        korisnikId: noviMuallim.id,
+        status: StatusUcenika.AKTIVAN,
+      },
+    });
+
+    kreiraniMuallimi.push(noviMuallim);
+    console.log(`  ✅ Muallim kreiran: ${muallimData.ime} ${muallimData.prezime}`);
+  }
+
+  console.log(`\n✅ Ukupno muallima: ${kreiraniMuallimi.length}\n`);
+
+  // ============================================
+  // 6. KREIRANJE NASTAVNE GODINE I NASTAVNOG PLANA
+  // ============================================
+  console.log('📅 Kreiranje nastavne godine i nastavnog plana...\n');
+
+  let nastavniPlan = await prisma.nastavniPlan.findFirst({
+    where: { naziv: 'Osnovni nastavni plan 2024/2025' },
+  });
+
+  if (!nastavniPlan) {
+    nastavniPlan = await prisma.nastavniPlan.create({
+      data: {
+        naziv: 'Osnovni nastavni plan 2024/2025',
+        opis: 'Osnovni nastavni plan za školsku godinu 2024/2025',
+        datumUsvajanja: new Date('2024-09-01'),
+        aktivan: true,
+      },
+    });
+    console.log('✅ Nastavni plan kreiran');
+  } else {
+    console.log('✅ Nastavni plan već postoji');
+  }
+
+  const datumOd = new Date('2024-09-01');
+  const datumDo = new Date('2025-06-30');
+
+  let nastavnaGodina = await prisma.nastavnaGodina.findFirst({
+    where: { naziv: '2024/2025' },
+  });
+
+  if (!nastavnaGodina) {
+    nastavnaGodina = await prisma.nastavnaGodina.create({
+      data: {
+        naziv: '2024/2025',
+        opis: 'Nastavna godina 2024/2025',
+        datumOd,
+        datumDo,
+        nastavniPlanId: nastavniPlan.id,
+        status: 'ACTIVE',
+      },
+    });
+    console.log('✅ Nastavna godina kreirana');
+  } else {
+    console.log('✅ Nastavna godina već postoji');
+  }
+
+  console.log('');
+
+  // ============================================
+  // 7. KREIRANJE RAZRED_NastavnaGodina I GRUPA
+  // ============================================
+  console.log('📚 Kreiranje razreda u nastavnoj godini i grupa...\n');
+
+  const sviRazredi = await prisma.razred.findMany();
+  const razredNastavnaGodinaMap = new Map<string, string>(); // razredId -> razredNastavnaGodinaId
+  const grupeMap = new Map<string, Array<{ id: string; naziv: string }>>(); // razredNastavnaGodinaId -> grupe
+
+  // Dijeli muallime između razreda
+  let muallimIndex = 0;
+
+  for (const razred of sviRazredi) {
+    const muallimZaRazred = kreiraniMuallimi[muallimIndex % kreiraniMuallimi.length];
+    muallimIndex++;
+
+    // Pronađi Ucenik zapis za muallima
+    const muallimUcenik = await prisma.ucenik.findUnique({
+      where: { korisnikId: muallimZaRazred.id },
+    });
+
+    if (!muallimUcenik) {
+      console.log(`  ⚠️  Muallim ${muallimZaRazred.ime} nema Ucenik zapis, preskačem...`);
+      continue;
+    }
+
+    // Odluči da li će razred biti podijeljen u grupe (50% šanse za razrede 1-9)
+    const split = razred.name !== 'Škola Hifza' && Math.random() > 0.5;
+
+    const razredNG = await prisma.razredNastavnaGodina.upsert({
+      where: {
+        nastavnaGodinaId_razredId: {
+          nastavnaGodinaId: nastavnaGodina.id,
+          razredId: razred.id,
+        },
+      },
+      update: {},
+      create: {
+        nastavnaGodinaId: nastavnaGodina.id,
+        razredId: razred.id,
+        muallimId: muallimUcenik.id,
+        split,
+      },
+    });
+
+    razredNastavnaGodinaMap.set(razred.id, razredNG.id);
+    console.log(`  ✅ ${razred.name} - Muallim: ${muallimZaRazred.ime} ${muallimZaRazred.prezime} (Split: ${split ? 'Da' : 'Ne'})`);
+
+    // Kreiraj grupe
+    const grupe: Array<{ id: string; naziv: string }> = [];
+
+    if (split) {
+      // Kreiraj grupe A i B
+      for (const nazivGrupe of ['A', 'B']) {
+        const grupa = await prisma.grupa.upsert({
+          where: {
+            razredNastavnaGodinaId_naziv: {
+              razredNastavnaGodinaId: razredNG.id,
+              naziv: nazivGrupe,
+            },
+          },
+          update: {},
+          create: {
+            razredNastavnaGodinaId: razredNG.id,
+            naziv: nazivGrupe,
+            kuran: Math.random() > 0.5,
+            sufara: Math.random() > 0.5,
+          },
+        });
+        grupe.push({ id: grupa.id, naziv: grupa.naziv });
+      }
+    } else {
+      // Kreiraj samo jednu grupu (bez naziva ili "A")
+      const grupa = await prisma.grupa.upsert({
+        where: {
+          razredNastavnaGodinaId_naziv: {
+            razredNastavnaGodinaId: razredNG.id,
+            naziv: 'A',
+          },
+        },
+        update: {},
+        create: {
+          razredNastavnaGodinaId: razredNG.id,
+          naziv: 'A',
+          kuran: Math.random() > 0.5,
+          sufara: Math.random() > 0.5,
+        },
+      });
+      grupe.push({ id: grupa.id, naziv: grupa.naziv });
+    }
+
+    grupeMap.set(razredNG.id, grupe);
+  }
+
+  console.log(`\n✅ Kreirano ${razredNastavnaGodinaMap.size} razreda u nastavnoj godini\n`);
+
+  // ============================================
+  // 8. KREIRANJE RASPOREDA ZA SVAKU GRUPU
+  // ============================================
+  console.log('📋 Kreiranje rasporeda za grupe...\n');
+
+  const rasporediMap = new Map<string, string>(); // grupaId -> rasporedId
+  const timeSlots = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00'];
+
+  for (const [razredNGId, grupe] of grupeMap.entries()) {
+    for (const grupa of grupe) {
+      // Kreiraj raspored za grupu (jedan raspored po grupi - za subotu)
+      // Za nedjelju ćemo koristiti isti raspored ali sa nedjelja datumom
+      const raspored = await prisma.raspored.upsert({
+        where: { grupaId: grupa.id },
+        update: {},
+        create: {
+          grupaId: grupa.id,
+          dan: DanUNedelji.subota,
+          slot: timeSlots[Math.floor(Math.random() * timeSlots.length)],
+          lokacija: `Sala ${Math.floor(Math.random() * 10) + 1}`,
+          trajanje: 45,
+        },
+      });
+
+      rasporediMap.set(grupa.id, raspored.id);
+      console.log(`  ✅ Grupa ${grupa.naziv}: ${raspored.slot} (${raspored.dan})`);
+    }
+  }
+
+  console.log(`\n✅ Kreirano ${rasporediMap.size} rasporeda\n`);
+
+  // ============================================
+  // 9. KREIRANJE UČENIKA I DODJELA GRUPAMA
+  // ============================================
+  console.log('👥 Kreiranje učenika i dodjela grupama...\n');
+
+  const imena = ['Ahmed', 'Fatima', 'Emir', 'Amina', 'Haris', 'Lejla', 'Adnan', 'Emina', 'Dženan', 'Selma', 'Armin', 'Ena', 'Tarik', 'Dina', 'Kenan', 'Maja', 'Nedim', 'Sara', 'Aldin', 'Lana'];
+  const prezimena = ['Hasanović', 'Mehmedović', 'Alić', 'Kovačević', 'Džafić', 'Begić', 'Suljić', 'Hadžić', 'Osmanović', 'Jusufović', 'Mujić', 'Karić', 'Čengić', 'Delić', 'Pirić', 'Hodžić', 'Zukić', 'Kurtović', 'Malić', 'Tomić'];
+
+  let ukupnoUcenika = 0;
+  const uceniciMap = new Map<string, Array<string>>(); // grupaId -> ucenikIds
+
+  for (const [razredNGId, grupe] of grupeMap.entries()) {
+    const razredNG = await prisma.razredNastavnaGodina.findUnique({
+      where: { id: razredNGId },
+      include: { razred: true },
+    });
+
+    if (!razredNG) continue;
+
+    // Broj učenika po grupi (10-20)
+    const brojUcenikaPoGrupi = Math.floor(Math.random() * 11) + 10;
+
+    for (const grupa of grupe) {
+      const uceniciUGrupi: string[] = [];
+
+      for (let i = 0; i < brojUcenikaPoGrupi; i++) {
+        const ime = imena[Math.floor(Math.random() * imena.length)];
+        const prezime = prezimena[Math.floor(Math.random() * prezimena.length)];
+        const email = `${ime.toLowerCase()}.${prezime.toLowerCase()}.${ukupnoUcenika}@emekteb.ba`;
+
+        // Generiši jedinstven PIN (4-cifreni)
+        // Koristimo ukupnoUcenika kao osnovu, ali dodajemo offset da izbjegnemo konflikte sa postojećim PIN-ovima
+        // Format: 2000 + (ukupnoUcenika % 8000) - osigurava PIN-ove između 2000-9999
+        let pin = String(2000 + (ukupnoUcenika % 8000));
+        
+        // Provjeri da li PIN već postoji i ako postoji, generiši alternativni
+        const existingPin = await prisma.korisnik.findUnique({
+          where: { pin },
+        });
+        
+        if (existingPin) {
+          // Ako PIN postoji, koristi kombinaciju sa timestamp-om
+          pin = String((2000 + ukupnoUcenika + Date.now()) % 10000).padStart(4, '0');
+        }
+
+        // Kreiraj ili ažuriraj korisnika (upsert za email)
+        const korisnik = await prisma.korisnik.upsert({
+          where: { email },
+          update: {
+            lozinka: hashedPassword,
+            ime,
+            prezime,
+            uloga: Uloga.UCENIK,
+            aktivan: true,
+            pin,
+          },
+          create: {
+            email,
+            lozinka: hashedPassword,
+            ime,
+            prezime,
+            uloga: Uloga.UCENIK,
+            aktivan: true,
+            pin,
+          },
+        });
+
+        // Kreiraj učenika
+        const ucenik = await prisma.ucenik.create({
+          data: {
+            korisnikId: korisnik.id,
+            datumRodjenja: new Date(2010 + Math.floor(Math.random() * 10), Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1),
+            spol: Math.random() > 0.5 ? Spol.MUSKO : Spol.ZENSKO,
+            mjestoRodjenja: ['Sarajevo', 'Tuzla', 'Zenica', 'Mostar', 'Banja Luka'][Math.floor(Math.random() * 5)],
+            adresaStanovanja: `Ulica ${Math.floor(Math.random() * 100) + 1}`,
+            status: StatusUcenika.AKTIVAN,
+          },
+        });
+
+        // Dodaj učenika u grupu
+        await prisma.ucenikGrupa.create({
+          data: {
+            ucenikId: ucenik.id,
+            grupaId: grupa.id,
+          },
+        });
+
+        uceniciUGrupi.push(ucenik.id);
+        ukupnoUcenika++;
+      }
+
+      uceniciMap.set(grupa.id, uceniciUGrupi);
+      console.log(`  ✅ Grupa ${grupa.naziv} (${razredNG.razred.name}): ${uceniciUGrupi.length} učenika`);
+    }
+  }
+
+  console.log(`\n✅ Ukupno kreirano ${ukupnoUcenika} učenika\n`);
+
+  // ============================================
+  // 10. KREIRANJE ČASOVA ZA SVAKU GRUPU I DAN
+  // ============================================
+  console.log('📝 Kreiranje časova za sve grupe i dane...\n');
+
+  // Funkcija za pronalaženje datuma subote i nedjelje
+  function getSubotaNedjeljaDates(weeksBack: number): { subota: Date; nedjelja: Date } {
+    const danas = new Date();
+    const danasDay = danas.getDay(); // 0 = nedjelja, 6 = subota
+    
+    // Pronađi posljednju subotu
+    let daysToLastSubota = (danasDay + 1) % 7; // Broj dana do posljednje subote
+    if (daysToLastSubota === 0) daysToLastSubota = 7;
+    
+    const lastSubota = new Date(danas);
+    lastSubota.setDate(danas.getDate() - daysToLastSubota - (weeksBack * 7));
+    lastSubota.setHours(9, 0, 0, 0);
+    
+    const nedjelja = new Date(lastSubota);
+    nedjelja.setDate(lastSubota.getDate() + 1);
+    nedjelja.setHours(9, 0, 0, 0);
+    
+    return { subota: lastSubota, nedjelja };
+  }
+
+  // Kreiraj časove za posljednjih 4 tjedna (8 dana - 4 subote i 4 nedjelje)
+  const casoviMap = new Map<string, Array<{ id: string; datum: Date }>>(); // grupaId -> casovi
+
+  // Pronađi sve lekcije (KURAN i SUFARA)
+  const lekcijeKuranSufara = await prisma.lekcija.findMany({
+    where: {
+      tip: {
+        in: [TipLekcije.KURAN, TipLekcije.SUFARA],
+      },
+    },
+  });
+
+  let ukupnoCasova = 0;
+
+  for (const [grupaId, rasporedId] of rasporediMap.entries()) {
+    const razredNGId = Array.from(grupeMap.entries()).find(([_, gs]) => gs.some(g => g.id === grupaId))?.[0];
+    if (!razredNGId) continue;
+
+    const casoviUGrupi: Array<{ id: string; datum: Date }> = [];
+
+    // Kreiraj časove za posljednja 4 tjedna
+    for (let tjedan = 0; tjedan < 4; tjedan++) {
+      const { subota, nedjelja } = getSubotaNedjeljaDates(tjedan);
+
+      // Subota
+      const casSubota = await prisma.cas.create({
+        data: {
+          nastavnaGodinaId: nastavnaGodina.id,
+          razredNastavnaGodinaId: razredNGId,
+          grupaId,
+          rasporedId,
+          datum: subota,
+          tipovi: [TipCasa.LEKCIJA],
+          napomena: Math.random() > 0.7 ? 'Posebna napomena za ovaj čas' : null,
+        },
+      });
+
+      // Dodaj lekcije u čas
+      const brojLekcija = Math.floor(Math.random() * 3) + 1;
+      const odabraneLekcije = lekcijeKuranSufara.sort(() => 0.5 - Math.random()).slice(0, brojLekcija);
+      for (const lekcija of odabraneLekcije) {
+        await prisma.casLekcija.upsert({
+          where: {
+            casId_lekcijaId: {
+              casId: casSubota.id,
+              lekcijaId: lekcija.id,
+            },
+          },
+          update: {},
+          create: {
+            casId: casSubota.id,
+            lekcijaId: lekcija.id,
+          },
+        });
+      }
+
+      casoviUGrupi.push({ id: casSubota.id, datum: subota });
+      ukupnoCasova++;
+
+      // Nedjelja (koristi isti raspored ali sa nedjelja datumom)
+      const casNedjelja = await prisma.cas.create({
+        data: {
+          nastavnaGodinaId: nastavnaGodina.id,
+          razredNastavnaGodinaId: razredNGId,
+          grupaId,
+          rasporedId, // Isti raspored
+          datum: nedjelja,
+          tipovi: [TipCasa.LEKCIJA],
+          napomena: Math.random() > 0.7 ? 'Posebna napomena za ovaj čas' : null,
+        },
+      });
+
+      // Dodaj lekcije u čas
+      const brojLekcijaNedjelja = Math.floor(Math.random() * 3) + 1;
+      const odabraneLekcijeNedjelja = lekcijeKuranSufara.sort(() => 0.5 - Math.random()).slice(0, brojLekcijaNedjelja);
+      for (const lekcija of odabraneLekcijeNedjelja) {
+        await prisma.casLekcija.upsert({
+          where: {
+            casId_lekcijaId: {
+              casId: casNedjelja.id,
+              lekcijaId: lekcija.id,
+            },
+          },
+          update: {},
+          create: {
+            casId: casNedjelja.id,
+            lekcijaId: lekcija.id,
+          },
+        });
+      }
+
+      casoviUGrupi.push({ id: casNedjelja.id, datum: nedjelja });
+      ukupnoCasova++;
+    }
+
+    casoviMap.set(grupaId, casoviUGrupi);
+  }
+
+  console.log(`✅ Kreirano ${ukupnoCasova} časova\n`);
+
+  // ============================================
+  // 11. KREIRANJE PRISUSTVA ZA SVAKI ČAS
+  // ============================================
+  console.log('✅ Kreiranje prisustva za sve časove...\n');
+
+  let ukupnoPrisustva = 0;
+
+  for (const [grupaId, casovi] of casoviMap.entries()) {
+    const ucenici = uceniciMap.get(grupaId) || [];
+
+    for (const cas of casovi) {
+      for (const ucenikId of ucenici) {
+        // 80% šansa da je prisutan, 10% opravdan, 10% neopravdan
+        const rand = Math.random();
+        let status: StatusPrisustva;
+        if (rand < 0.8) {
+          status = StatusPrisustva.PRISUTAN;
+        } else if (rand < 0.9) {
+          status = StatusPrisustva.OPRAVDAN;
+        } else {
+          status = StatusPrisustva.NEOPRAVDAN;
+        }
+
+        await prisma.casPrisustvo.upsert({
+          where: {
+            casId_ucenikId: {
+              casId: cas.id,
+              ucenikId,
+            },
+          },
+          update: {},
+          create: {
+            casId: cas.id,
+            ucenikId,
+            status,
+            napomena: status !== StatusPrisustva.PRISUTAN && Math.random() > 0.5 ? 'Razlog odsutnosti' : null,
+          },
+        });
+
+        ukupnoPrisustva++;
+      }
+    }
+  }
+
+  console.log(`✅ Kreirano ${ukupnoPrisustva} zapisa prisustva\n`);
+
+  // ============================================
+  // 12. KREIRANJE OCJENA ZA PRISUTNE UČENIKE
+  // ============================================
+  console.log('📊 Kreiranje ocjena za prisutne učenike...\n');
+
+  let ukupnoOcjena = 0;
+
+  for (const [grupaId, casovi] of casoviMap.entries()) {
+    for (const cas of casovi) {
+      // Pronađi lekcije za ovaj čas
+      const lekcijeUCasu = await prisma.casLekcija.findMany({
+        where: { casId: cas.id },
+        include: { lekcija: true },
+      });
+
+      // Pronađi prisutne učenike
+      const prisutniUcenici = await prisma.casPrisustvo.findMany({
+        where: {
+          casId: cas.id,
+          status: StatusPrisustva.PRISUTAN,
+        },
+      });
+
+      for (const prisustvo of prisutniUcenici) {
+        // Za svaku lekciju, daj ocjenu (50% šansa)
+        for (const casLekcija of lekcijeUCasu) {
+          if (Math.random() > 0.5) {
+            const ocjena = Math.floor(Math.random() * 3) + 3; // 3, 4, ili 5
+
+            await prisma.casOcjena.upsert({
+              where: {
+                casId_ucenikId_lekcijaId: {
+                  casId: cas.id,
+                  ucenikId: prisustvo.ucenikId,
+                  lekcijaId: casLekcija.lekcijaId,
+                },
+              },
+              update: {},
+              create: {
+                casId: cas.id,
+                ucenikId: prisustvo.ucenikId,
+                lekcijaId: casLekcija.lekcijaId,
+                ocjena,
+                komentar: Math.random() > 0.7 ? 'Dobar napredak' : null,
+              },
+            });
+
+            ukupnoOcjena++;
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`✅ Kreirano ${ukupnoOcjena} ocjena\n`);
+
+  // ============================================
+  // 13. KREIRANJE ŠKOLA HIFZA PODATAKA
+  // ============================================
+  console.log('📖 Kreiranje Škola Hifza podataka...\n');
+
+  const skolaHifzaRazredNG = Array.from(razredNastavnaGodinaMap.entries()).find(([razredId]) => {
+    return sviRazredi.find(r => r.id === razredId)?.name === 'Škola Hifza';
+  });
+
+  if (skolaHifzaRazredNG) {
+    // Kreiraj SkolaHifza zapis
+    const skolaHifzaLekcije = await prisma.lekcija.findMany({
+      where: { tip: TipLekcije.SKOLA_HIFZA },
+    });
+
+    const skolaHifza = await prisma.skolaHifza.upsert({
+      where: { nastavnaGodinaId: nastavnaGodina.id },
+      update: {},
+      create: {
+        nastavnaGodinaId: nastavnaGodina.id,
+        lekcije: skolaHifzaLekcije.map(l => l.id),
+      },
+    });
+
+    // Dodaj muallime u Školu Hifza
+    const skolaHifzaMuallimi = kreiraniMuallimi.slice(0, 3); // Prva 3 muallima
+    for (const muallimKorisnik of skolaHifzaMuallimi) {
+      const muallimUcenik = await prisma.ucenik.findUnique({
+        where: { korisnikId: muallimKorisnik.id },
+      });
+
+      if (muallimUcenik) {
+        await prisma.skolaHifzaMuallim.upsert({
+          where: {
+            skolaHifzaId_muallimId: {
+              skolaHifzaId: skolaHifza.id,
+              muallimId: muallimUcenik.id,
+            },
+          },
+          update: {},
+          create: {
+            skolaHifzaId: skolaHifza.id,
+            muallimId: muallimUcenik.id,
+          },
+        });
+      }
+    }
+
+    // Dodaj učenike u Školu Hifza (neki učenici iz različitih grupa)
+    let dodanoUcenika = 0;
+    for (const [grupaId, ucenici] of uceniciMap.entries()) {
+      if (dodanoUcenika >= 20) break; // Maksimalno 20 učenika
+
+      const muallimUcenik = await prisma.ucenik.findUnique({
+        where: { korisnikId: skolaHifzaMuallimi[0].id },
+      });
+
+      if (muallimUcenik) {
+        for (let i = 0; i < Math.min(3, ucenici.length); i++) {
+          const ucenikId = ucenici[i];
+          const napredak: Record<string, number[]> = {};
+          const nekeSure = skolaHifzaLekcije.slice(0, 5);
+          for (const sura of nekeSure) {
+            napredak[sura.naslov] = Array.from({ length: Math.floor(Math.random() * 5) + 1 }, (_, i) => i + 1);
+          }
+
+          await prisma.skolaHifzaUcenik.upsert({
+            where: {
+              skolaHifzaId_ucenikId: {
+                skolaHifzaId: skolaHifza.id,
+                ucenikId,
+              },
+            },
+            update: {},
+            create: {
+              skolaHifzaId: skolaHifza.id,
+              ucenikId,
+              muallimId: muallimUcenik.id,
+              napredak,
+            },
+          });
+
+          dodanoUcenika++;
+        }
+      }
+    }
+
+    // Kreiraj časove za Školu Hifza
+    const skolaHifzaGrupe = grupeMap.get(skolaHifzaRazredNG[1]) || [];
+    if (skolaHifzaGrupe.length > 0) {
+      const skolaHifzaGrupa = skolaHifzaGrupe[0];
+      const rasporedId = rasporediMap.get(skolaHifzaGrupa.id);
+
+      if (rasporedId) {
+        const skolaHifzaUcenici = await prisma.skolaHifzaUcenik.findMany({
+          where: { skolaHifzaId: skolaHifza.id },
+        });
+
+        for (let tjedan = 0; tjedan < 4; tjedan++) {
+          const { subota, nedjelja } = getSubotaNedjeljaDates(tjedan);
+
+          const casSubota = await prisma.skolaHifzaCas.create({
+            data: {
+              skolaHifzaId: skolaHifza.id,
+              slotId: rasporedId,
+              datum: subota,
+              napomena: Math.random() > 0.7 ? 'Napomena za Školu Hifza' : null,
+              napredak: {},
+              komentari: {},
+            },
+          });
+
+          // Kreiraj prisustva za subotu
+          for (const shUcenik of skolaHifzaUcenici) {
+            const rand = Math.random();
+            let status: StatusPrisustva;
+            if (rand < 0.8) {
+              status = StatusPrisustva.PRISUTAN;
+            } else if (rand < 0.9) {
+              status = StatusPrisustva.OPRAVDAN;
+            } else {
+              status = StatusPrisustva.NEOPRAVDAN;
+            }
+
+            await prisma.skolaHifzaPrisustvo.create({
+              data: {
+                casId: casSubota.id,
+                ucenikId: shUcenik.ucenikId,
+                status,
+                napomena: status !== StatusPrisustva.PRISUTAN && Math.random() > 0.5 ? 'Razlog odsutnosti' : null,
+              },
+            });
+          }
+
+          const casNedjelja = await prisma.skolaHifzaCas.create({
+            data: {
+              skolaHifzaId: skolaHifza.id,
+              slotId: rasporedId,
+              datum: nedjelja,
+              napomena: Math.random() > 0.7 ? 'Napomena za Školu Hifza' : null,
+              napredak: {},
+              komentari: {},
+            },
+          });
+
+          // Kreiraj prisustva za nedjelju
+          for (const shUcenik of skolaHifzaUcenici) {
+            const rand = Math.random();
+            let status: StatusPrisustva;
+            if (rand < 0.8) {
+              status = StatusPrisustva.PRISUTAN;
+            } else if (rand < 0.9) {
+              status = StatusPrisustva.OPRAVDAN;
+            } else {
+              status = StatusPrisustva.NEOPRAVDAN;
+            }
+
+            await prisma.skolaHifzaPrisustvo.create({
+              data: {
+                casId: casNedjelja.id,
+                ucenikId: shUcenik.ucenikId,
+                status,
+                napomena: status !== StatusPrisustva.PRISUTAN && Math.random() > 0.5 ? 'Razlog odsutnosti' : null,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    console.log(`✅ Škola Hifza: ${dodanoUcenika} učenika, ${skolaHifzaMuallimi.length} muallima\n`);
+  }
+
   console.log('\n🎉 Seeding završen!');
   console.log('\n📊 Statistika:');
-  console.log(`   - Razredi: Kreirano ${kreiranoRazreda}, Već postojalo ${postojaloRazreda}`);
-  console.log(`   - Lekcije (KURAN/SUFARA): Novih ${novihLekcija}, Ukupno ${kreiraneLekcije.length}`);
-  console.log(`   - Veze između razreda i lekcija se kreiraju u nastavnom planu`);
+  console.log(`   - Razredi: ${sviRazredi.length}`);
+  console.log(`   - Muallimi: ${kreiraniMuallimi.length}`);
+  console.log(`   - Nastavna godina: ${nastavnaGodina.naziv}`);
+  console.log(`   - Razredi u nastavnoj godini: ${razredNastavnaGodinaMap.size}`);
+  console.log(`   - Grupe: ${Array.from(grupeMap.values()).flat().length}`);
+  console.log(`   - Rasporedi: ${rasporediMap.size}`);
+  console.log(`   - Učenici: ${ukupnoUcenika}`);
+  console.log(`   - Časovi: ${ukupnoCasova}`);
+  console.log(`   - Prisustva: ${ukupnoPrisustva}`);
+  console.log(`   - Ocjene: ${ukupnoOcjena}`);
   console.log('\n📝 Login credentials:');
   console.log('   Admin: admin@emekteb.ba / password123 / PIN: 0000');
-  console.log('   Muallim: muhidin.topcagic@emekteb.ba / password123 / PIN: 1234');
-  console.log('\n💡 Napomena: Učenici će se automatski importovati pri pokretanju aplikacije iz CSV fajla.');
+  console.log('   Muallimi: email@emekteb.ba / password123 / PIN: xxxx');
+  console.log('   Učenici: ime.prezime.@emekteb.ba / password123 / PIN: xxxx');
 }
 
 main()

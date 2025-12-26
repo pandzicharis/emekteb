@@ -2566,36 +2566,69 @@ export class ReportsService {
     const pageHeight = doc.internal.pageSize.getHeight();
     let yPosition = 20;
 
-    // Header
-    doc.setFontSize(20);
-    doc.setTextColor(59, 130, 246); // indigo-600
-    doc.text('IZVJEŠTAJ O UČENIKU', pageWidth / 2, yPosition, { align: 'center' });
-    yPosition += 10;
-
-    // Student Information
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${data.ucenik.ime} ${data.ucenik.prezime}`, pageWidth / 2, yPosition, { align: 'center' });
-    yPosition += 8;
-
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Nastavna godina: ${data.nastavnaGodina.naziv}`, 20, yPosition);
-    yPosition += 6;
-    
+    // Get razred from razredi array or from napredak field
+    let razredText = '';
     if (data.razredi.length > 0) {
-      doc.text(`Razred: ${data.razredi.map((r: any) => r.razred.name).join(', ')}`, 20, yPosition);
-      yPosition += 6;
+      razredText = data.razredi.map((r: any) => r.razred?.name || '').filter(Boolean).join(', ');
+    }
+    
+    // Fallback: try to get razred from napredak field if razredi is empty
+    if (!razredText && data.ucenik) {
+      const ucenik = await this.prisma.ucenik.findUnique({
+        where: { id: data.ucenik.id },
+        select: { napredak: true },
+      });
+      
+      if (ucenik?.napredak && typeof ucenik.napredak === 'object') {
+        const napredak = ucenik.napredak as Record<string, any>;
+        const napredakEntry = napredak[nastavnaGodinaId];
+        if (napredakEntry?.razred) {
+          const razred = await this.prisma.razred.findUnique({
+            where: { id: napredakEntry.razred },
+            select: { name: true },
+          });
+          if (razred) {
+            razredText = razred.name;
+          }
+        }
+      }
     }
 
-    if (data.ucenik.datumRodjenja) {
-      const datumRodjenja = new Date(data.ucenik.datumRodjenja).toLocaleDateString('bs-BA');
-      doc.text(`Datum rođenja: ${datumRodjenja}`, 20, yPosition);
-      yPosition += 6;
-    }
+    // Function to add header on each page
+    const addHeader = () => {
+      doc.setFontSize(20);
+      doc.setTextColor(59, 130, 246); // indigo-600
+      doc.text('IZVJEŠTAJ O UČENIKU', pageWidth / 2, 15, { align: 'center' });
 
-    yPosition += 5;
+      // Student Information
+      doc.setFontSize(14);
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${data.ucenik.ime} ${data.ucenik.prezime}`, pageWidth / 2, 23, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Nastavna godina: ${data.nastavnaGodina.naziv}`, 20, 30);
+      
+      if (razredText) {
+        doc.text(`Razred: ${razredText}`, 20, 36);
+      }
+
+      if (data.ucenik.datumRodjenja) {
+        const datumRodjenja = new Date(data.ucenik.datumRodjenja).toLocaleDateString('bs-BA');
+        const yPos = razredText ? 42 : 36;
+        doc.text(`Datum rođenja: ${datumRodjenja}`, 20, yPos);
+      }
+
+      // Draw a line under header
+      doc.setDrawColor(200, 200, 200);
+      const headerBottomY = data.ucenik.datumRodjenja ? (razredText ? 48 : 42) : (razredText ? 42 : 36);
+      doc.line(20, headerBottomY, pageWidth - 20, headerBottomY);
+    };
+
+    // Add header on first page
+    addHeader();
+    yPosition = (data.ucenik.datumRodjenja ? (razredText ? 54 : 48) : (razredText ? 48 : 42)) + 5;
 
     // Attendance Statistics
     const attendanceData = data.attendance?.summaryByStudent?.[0] || {
@@ -2635,7 +2668,8 @@ export class ReportsService {
     
     if (yPosition > pageHeight - 40) {
       doc.addPage();
-      yPosition = 20;
+      addHeader();
+      yPosition = (data.ucenik.datumRodjenja ? (razredText ? 54 : 48) : (razredText ? 48 : 42)) + 5;
     }
 
     doc.setFontSize(12);
@@ -2669,7 +2703,8 @@ export class ReportsService {
     const stats = data.stats || {};
     if (yPosition > pageHeight - 40) {
       doc.addPage();
-      yPosition = 20;
+      addHeader();
+      yPosition = (data.ucenik.datumRodjenja ? (razredText ? 54 : 48) : (razredText ? 48 : 42)) + 5;
     }
 
     doc.setFontSize(12);
@@ -2698,7 +2733,8 @@ export class ReportsService {
     if (customComments && Object.keys(customComments).length > 0) {
       if (yPosition > pageHeight - 50) {
         doc.addPage();
-        yPosition = 20;
+        addHeader();
+        yPosition = (data.ucenik.datumRodjenja ? (razredText ? 54 : 48) : (razredText ? 48 : 42)) + 5;
       }
 
       doc.setFontSize(12);
@@ -2742,6 +2778,22 @@ export class ReportsService {
     datum: string;
     godina: string;
   }): Promise<Buffer> {
+    console.log('=== generateDiplomaPDF called ===');
+    console.log('Parameters:', {
+      ucenikId,
+      nastavnaGodinaId,
+      diplomaData,
+    });
+    
+    // Validate required parameters
+    if (!ucenikId || !nastavnaGodinaId) {
+      throw new BadRequestException('ucenikId i nastavnaGodinaId su obavezni');
+    }
+    
+    if (!diplomaData.imePrezime || !diplomaData.nivo || !diplomaData.datum || !diplomaData.godina) {
+      throw new BadRequestException('Svi podaci za diplomu su obavezni (imePrezime, nivo, datum, godina)');
+    }
+    
     try {
       // Load the template PDF
       // In Docker: working_dir is /app/apps/api, so we need to go up to /app
@@ -2752,28 +2804,70 @@ export class ReportsService {
         path.join(process.cwd(), 'pdf', 'ILMIHAL.pdf'),
         path.join(process.cwd(), '..', '..', 'apps', 'web', 'public', 'ILMIHAL.pdf'), // /app/apps/web/public/ILMIHAL.pdf
         path.join(__dirname, '..', '..', '..', '..', 'pdf', 'ILMIHAL.pdf'),
+        path.join(__dirname, '..', '..', '..', '..', '..', 'pdf', 'ILMIHAL.pdf'),
+        path.join(__dirname, '..', '..', '..', '..', '..', 'apps', 'web', 'public', 'ILMIHAL.pdf'),
       ];
       
-      let templatePath = possiblePaths.find(p => fs.existsSync(p));
+      console.log('Searching for PDF template...');
+      console.log('Current working directory:', process.cwd());
+      console.log('__dirname:', __dirname);
+      
+      let templatePath: string | undefined;
+      for (const possiblePath of possiblePaths) {
+        const normalizedPath = path.resolve(possiblePath);
+        console.log(`Checking path: ${normalizedPath} (exists: ${fs.existsSync(normalizedPath)})`);
+        if (fs.existsSync(normalizedPath)) {
+          templatePath = normalizedPath;
+          console.log(`✅ Found PDF template at: ${templatePath}`);
+          break;
+        }
+      }
       
       if (!templatePath) {
-        // Fallback: try to find it relative to workspace root
-        templatePath = path.join(process.cwd(), 'pdf', 'ILMIHAL.pdf');
-      }
-      
-      if (!templatePath || !fs.existsSync(templatePath)) {
-        console.error('PDF template not found. Tried paths:', possiblePaths);
+        console.error('PDF template not found. Tried paths:', possiblePaths.map(p => path.resolve(p)));
         console.error('Current working directory:', process.cwd());
-        throw new BadRequestException(`PDF template not found. Searched in: ${possiblePaths.join(', ')}`);
+        throw new BadRequestException(`PDF template not found. Searched in: ${possiblePaths.map(p => path.resolve(p)).join(', ')}`);
       }
 
-      const templateBytes = fs.readFileSync(templatePath);
-      const pdfDoc = await PDFDocument.load(templateBytes);
+      console.log(`Loading PDF template from: ${templatePath}`);
+      
+      let templateBytes: Buffer;
+      try {
+        templateBytes = fs.readFileSync(templatePath);
+        console.log(`PDF template loaded, size: ${templateBytes.length} bytes`);
+      } catch (readError) {
+        console.error('Error reading PDF file:', readError);
+        throw new BadRequestException(`Greška pri čitanju PDF template fajla: ${readError instanceof Error ? readError.message : String(readError)}`);
+      }
+      
+      let pdfDoc: PDFDocument;
+      try {
+        pdfDoc = await PDFDocument.load(templateBytes);
+        console.log('PDF document loaded successfully');
+      } catch (loadError) {
+        console.error('Error loading PDF document:', loadError);
+        throw new BadRequestException(`Greška pri učitavanju PDF dokumenta: ${loadError instanceof Error ? loadError.message : String(loadError)}`);
+      }
 
       // Get the first page
       const pages = pdfDoc.getPages();
       const firstPage = pages[0];
       const { width, height } = firstPage.getSize();
+
+      // Helper function to replace Bosnian characters for WinAnsi compatibility
+      const replaceBosnianChars = (text: string): string => {
+        return text
+          .replace(/Č/g, 'C')
+          .replace(/Ć/g, 'C')
+          .replace(/Đ/g, 'D')
+          .replace(/Š/g, 'S')
+          .replace(/Ž/g, 'Z')
+          .replace(/č/g, 'c')
+          .replace(/ć/g, 'c')
+          .replace(/đ/g, 'd')
+          .replace(/š/g, 's')
+          .replace(/ž/g, 'z');
+      };
 
       // Try to get form fields first
       try {
@@ -2782,18 +2876,19 @@ export class ReportsService {
         
         if (fields.length > 0) {
           // Map fields based on actual PDF field names
+          // Replace Bosnian characters for WinAnsi compatibility
+          const dateObj = new Date(diplomaData.datum);
+          const formattedDate = dateObj.toLocaleDateString('bs-BA', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+          });
+          
           const fieldMapping: Record<string, string> = {
-            'ime_prezime': diplomaData.imePrezime,
-            'nivo': diplomaData.nivo,
-            'datum': (() => {
-              const dateObj = new Date(diplomaData.datum);
-              return dateObj.toLocaleDateString('bs-BA', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-              });
-            })(),
-            'nastavna_godina': diplomaData.godina,
+            'ime_prezime': replaceBosnianChars(diplomaData.imePrezime),
+            'nivo': replaceBosnianChars(diplomaData.nivo),
+            'datum': replaceBosnianChars(formattedDate),
+            'nastavna_godina': replaceBosnianChars(diplomaData.godina),
           };
 
           // Try to find and fill form fields
@@ -2815,14 +2910,14 @@ export class ReportsService {
             if (fieldName.includes('ime') || fieldName.includes('name')) {
               try {
                 const textField = form.getTextField(fieldName);
-                textField.setText(diplomaData.imePrezime);
+                textField.setText(replaceBosnianChars(diplomaData.imePrezime));
               } catch (e) {
                 // Skip
               }
             } else if (fieldName.includes('nivo') || fieldName.includes('level')) {
               try {
                 const textField = form.getTextField(fieldName);
-                textField.setText(diplomaData.nivo);
+                textField.setText(replaceBosnianChars(diplomaData.nivo));
               } catch (e) {
                 // Skip
               }
@@ -2835,41 +2930,68 @@ export class ReportsService {
                   month: '2-digit',
                   year: 'numeric',
                 });
-                textField.setText(formattedDate);
+                textField.setText(replaceBosnianChars(formattedDate));
               } catch (e) {
                 // Skip
               }
             } else if (fieldName.includes('nastavna_godina') || fieldName.includes('godina') || fieldName.includes('year')) {
               try {
                 const textField = form.getTextField(fieldName);
-                textField.setText(diplomaData.godina);
+                textField.setText(replaceBosnianChars(diplomaData.godina));
               } catch (e) {
                 // Skip
               }
             }
           }
 
-          // Save and return
-          const pdfBytes = await pdfDoc.save();
+          // Save PDF first
+          console.log('Saving PDF with form fields...');
+          let pdfBytes: Uint8Array;
+          try {
+            pdfBytes = await pdfDoc.save();
+            console.log(`PDF saved successfully, size: ${pdfBytes.length} bytes`);
+          } catch (saveError) {
+            console.error('Error saving PDF with form fields:', saveError);
+            throw new BadRequestException(`Greška pri čuvanju PDF-a sa form fields: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+          }
+          
+          // Update student's progress (napredak) BEFORE returning PDF
+          console.log('═══════════════════════════════════════════════════════════');
+          console.log('📝 START: Updating napredak for ucenik (form fields path)');
+          console.log('  ucenikId:', ucenikId);
+          console.log('  nastavnaGodinaId:', nastavnaGodinaId);
+          console.log('═══════════════════════════════════════════════════════════');
+          
+          await this.updateNapredak(ucenikId, nastavnaGodinaId);
+          
+          console.log('Returning PDF buffer from form fields path, size:', pdfBytes.length);
           return Buffer.from(pdfBytes);
         }
       } catch (formError) {
         // PDF doesn't have form fields, use drawText method
         console.log('PDF does not have form fields, using drawText method');
+        console.log('Form error details:', formError instanceof Error ? formError.message : String(formError));
       }
 
       // Fallback: Draw text on the PDF using coordinates
+      // Note: replaceBosnianChars function is already defined above
+
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
       const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
+      // Replace Bosnian characters for compatibility
+      const imePrezimeSafe = replaceBosnianChars(diplomaData.imePrezime);
+      const nivoSafe = replaceBosnianChars(diplomaData.nivo);
+      const godinaSafe = replaceBosnianChars(diplomaData.godina);
+
       // Calculate text width for centering name
       const textSize = 14;
-      const textWidth = boldFont.widthOfTextAtSize(diplomaData.imePrezime, textSize);
+      const textWidth = boldFont.widthOfTextAtSize(imePrezimeSafe, textSize);
       const centeredX = (width - textWidth) / 2;
 
       // Draw text (coordinates need to be adjusted based on actual PDF)
       // These are placeholder coordinates
-      firstPage.drawText(diplomaData.imePrezime, {
+      firstPage.drawText(imePrezimeSafe, {
         x: centeredX,
         y: height - 200, // Adjust based on actual PDF
         size: textSize,
@@ -2877,7 +2999,7 @@ export class ReportsService {
         color: rgb(0, 0, 0),
       });
 
-      firstPage.drawText(diplomaData.nivo, {
+      firstPage.drawText(nivoSafe, {
         x: width / 2 - 50, // Adjust based on actual PDF
         y: height - 250,
         size: 12,
@@ -2891,8 +3013,9 @@ export class ReportsService {
         month: '2-digit',
         year: 'numeric',
       });
+      const formattedDateSafe = replaceBosnianChars(formattedDate);
 
-      firstPage.drawText(formattedDate, {
+      firstPage.drawText(formattedDateSafe, {
         x: width / 2 - 50,
         y: height - 300,
         size: 12,
@@ -2900,7 +3023,7 @@ export class ReportsService {
         color: rgb(0, 0, 0),
       });
 
-      firstPage.drawText(diplomaData.godina, {
+      firstPage.drawText(godinaSafe, {
         x: width / 2 - 50,
         y: height - 350,
         size: 12,
@@ -2908,13 +3031,189 @@ export class ReportsService {
         color: rgb(0, 0, 0),
       });
 
-      // Save and return
-      const pdfBytes = await pdfDoc.save();
+      // Save PDF first
+      console.log('Saving PDF with drawText method...');
+      let pdfBytes: Uint8Array;
+      try {
+        pdfBytes = await pdfDoc.save();
+        console.log(`PDF saved successfully, size: ${pdfBytes.length} bytes`);
+      } catch (saveError) {
+        console.error('Error saving PDF with drawText:', saveError);
+        throw new BadRequestException(`Greška pri čuvanju PDF-a: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+      }
+      
+      // Update student's progress (napredak) BEFORE returning PDF
+      console.log('═══════════════════════════════════════════════════════════');
+      console.log('📝 START: Updating napredak for ucenik (drawText path)');
+      console.log('  ucenikId:', ucenikId);
+      console.log('  nastavnaGodinaId:', nastavnaGodinaId);
+      console.log('═══════════════════════════════════════════════════════════');
+      
+      await this.updateNapredak(ucenikId, nastavnaGodinaId);
+      
+      console.log('Returning PDF buffer from drawText path, size:', pdfBytes.length);
       return Buffer.from(pdfBytes);
     } catch (error) {
       console.error('Error generating diploma PDF:', error);
-      throw new BadRequestException('Greška pri generisanju diplome');
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      console.error('Error details:', {
+        message: errorMessage,
+        stack: errorStack,
+        errorType: error?.constructor?.name,
+      });
+      throw new BadRequestException(
+        `Greška pri generisanju diplome: ${errorMessage}`
+      );
     }
+  }
+
+  private async updateNapredak(ucenikId: string, nastavnaGodinaId: string): Promise<void> {
+    try {
+        // Get student's razred for this nastavna godina
+        console.log('🔍 Step 1: Finding ucenikGrupa...');
+        const ucenikGrupa = await this.prisma.ucenikGrupa.findFirst({
+          where: {
+            ucenikId: ucenikId,
+            grupa: {
+              razredNastavnaGodina: {
+                nastavnaGodinaId: nastavnaGodinaId,
+              },
+            },
+          },
+          include: {
+            grupa: {
+              include: {
+                razredNastavnaGodina: {
+                  include: {
+                    razred: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        console.log('  ucenikGrupa found:', ucenikGrupa ? '✅ YES' : '❌ NO');
+        if (ucenikGrupa) {
+          console.log('  grupa.id:', ucenikGrupa.grupa?.id);
+          console.log('  razredNastavnaGodina:', ucenikGrupa.grupa?.razredNastavnaGodina ? '✅ EXISTS' : '❌ MISSING');
+          if (ucenikGrupa.grupa?.razredNastavnaGodina) {
+            console.log('    razredNastavnaGodina.id:', ucenikGrupa.grupa.razredNastavnaGodina.id);
+            console.log('    razredNastavnaGodina.razredId:', ucenikGrupa.grupa.razredNastavnaGodina.razredId);
+            console.log('    razredNastavnaGodina.nastavnaGodinaId:', ucenikGrupa.grupa.razredNastavnaGodina.nastavnaGodinaId);
+          }
+        } else {
+          console.log('  ⚠️  ucenikGrupa is null - student might not be in a group for this nastavna godina');
+        }
+
+        if (ucenikGrupa?.grupa?.razredNastavnaGodina?.razredId) {
+          console.log('✅ Step 2: Found razredId:', ucenikGrupa.grupa.razredNastavnaGodina.razredId);
+          const razredId = ucenikGrupa.grupa.razredNastavnaGodina.razredId;
+          
+          // Get current napredak or initialize empty object
+          console.log('🔍 Step 3: Getting current napredak from database...');
+          const ucenik = await this.prisma.ucenik.findUnique({
+            where: { id: ucenikId },
+            select: { napredak: true },
+          });
+
+          console.log('  Current napredak:', ucenik?.napredak ? JSON.stringify(ucenik.napredak, null, 2) : 'null/undefined');
+          const currentNapredak = (ucenik?.napredak as Record<string, any>) || {};
+          console.log('  Parsed currentNapredak:', JSON.stringify(currentNapredak, null, 2));
+          
+          // Get all SUFARA lessons learned by student in this nastavna godina
+          console.log('🔍 Step 4: Getting SUFARA ocjene...');
+          const sufaraOcjene = await this.prisma.casOcjena.findMany({
+            where: {
+              ucenikId: ucenikId,
+              cas: {
+                nastavnaGodinaId: nastavnaGodinaId,
+              },
+              lekcija: {
+                tip: 'SUFARA',
+              },
+            },
+            select: {
+              lekcijaId: true,
+            },
+            distinct: ['lekcijaId'],
+          });
+          const sufaraLekcijeIds = sufaraOcjene.map(o => o.lekcijaId);
+          console.log('  Found SUFARA ocjene:', sufaraOcjene.length);
+          console.log('  SUFARA lekcije IDs:', sufaraLekcijeIds);
+          
+          // Get Skola Hifza napredak for this nastavna godina
+          console.log('🔍 Step 5: Getting Skola Hifza napredak...');
+          const skolaHifzaUcenik = await this.prisma.skolaHifzaUcenik.findFirst({
+            where: {
+              ucenikId: ucenikId,
+              skolaHifza: {
+                nastavnaGodinaId: nastavnaGodinaId,
+              },
+            },
+            select: {
+              napredak: true,
+            },
+          });
+          const skolaHifzaNapredak = skolaHifzaUcenik?.napredak as Record<string, number[]> | null || null;
+          console.log('  Skola Hifza ucenik found:', skolaHifzaUcenik ? '✅ YES' : '❌ NO');
+          console.log('  Skola Hifza napredak:', skolaHifzaNapredak ? JSON.stringify(skolaHifzaNapredak, null, 2) : 'null');
+          
+          // Update napredak for this nastavna godina
+          console.log('🔍 Step 6: Building updated napredak object...');
+          const updatedNapredak = {
+            ...currentNapredak,
+            [nastavnaGodinaId]: {
+              razred: razredId,
+              pohvaleIPriznanja: [],
+              sufaraLekcije: sufaraLekcijeIds,
+              skolaHifzaNapredak: skolaHifzaNapredak,
+            },
+          };
+          console.log('  Updated napredak object:', JSON.stringify(updatedNapredak, null, 2));
+
+          // Save updated napredak
+          console.log('💾 Step 7: Saving to database (Ucenik table, napredak field)...');
+          console.log('  Table: ucenici');
+          console.log('  Field: napredak (JSON)');
+          console.log('  Where: id =', ucenikId);
+          console.log('  Data:', JSON.stringify({ napredak: updatedNapredak }, null, 2));
+          
+          const updatedUcenik = await this.prisma.ucenik.update({
+            where: { id: ucenikId },
+            data: { napredak: updatedNapredak },
+          });
+
+          console.log('✅ Step 8: Database update completed!');
+          console.log('  Updated ucenik.id:', updatedUcenik.id);
+          console.log('  Updated napredak in DB:', JSON.stringify(updatedUcenik.napredak, null, 2));
+          console.log(`✅ Successfully updated napredak for ucenik ${ucenikId}, nastavnaGodina ${nastavnaGodinaId}, razred ${razredId}, sufara lekcije: ${sufaraLekcijeIds.length}, skola hifza: ${skolaHifzaNapredak ? 'yes' : 'no'}`);
+        } else {
+          console.warn('❌ Step 2: Could not find razred for ucenik');
+          console.warn('  ucenikId:', ucenikId);
+          console.warn('  nastavnaGodinaId:', nastavnaGodinaId);
+          console.warn('  ucenikGrupa:', ucenikGrupa ? 'exists but missing razred' : 'null');
+          if (ucenikGrupa) {
+            console.warn('  grupa:', ucenikGrupa.grupa ? 'exists' : 'null');
+            console.warn('  razredNastavnaGodina:', ucenikGrupa.grupa?.razredNastavnaGodina ? 'exists' : 'null');
+            console.warn('  razredId:', ucenikGrupa.grupa?.razredNastavnaGodina?.razredId || 'missing');
+          }
+        }
+        console.log('═══════════════════════════════════════════════════════════');
+        console.log('📝 END: Updating napredak');
+        console.log('═══════════════════════════════════════════════════════════');
+      } catch (napredakError) {
+        // Log error but don't fail the diploma generation
+        console.error('═══════════════════════════════════════════════════════════');
+        console.error('❌ ERROR updating napredak:');
+        console.error('═══════════════════════════════════════════════════════════');
+        console.error('  Error message:', napredakError instanceof Error ? napredakError.message : String(napredakError));
+        console.error('  Error stack:', napredakError instanceof Error ? napredakError.stack : undefined);
+        console.error('  Error type:', napredakError?.constructor?.name);
+        console.error('  Full error:', napredakError);
+        console.error('═══════════════════════════════════════════════════════════');
+      }
   }
 }
 

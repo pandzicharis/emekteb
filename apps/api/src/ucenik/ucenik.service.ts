@@ -120,6 +120,7 @@ export class UcenikService {
           prosjek: null,
           razredNaziv: null,
           eksterniId: ucenik.eksterniId,
+          napredak: ucenik.napredak as any || null,
         })),
         total,
         page,
@@ -300,6 +301,7 @@ export class UcenikService {
         prosjek: ucenik.prosjek,
         razredNaziv: ucenik.razredNaziv,
         eksterniId: ucenik.eksterniId,
+        napredak: ucenik.napredak as any || null,
       })),
       total,
       page,
@@ -464,6 +466,7 @@ export class UcenikService {
       razredNaziv,
       grupaNaziv,
       terminOpis,
+      napredak: ucenik.napredak as any || null,
       // Porodični podaci
       imaRoditelje: ucenik.imaRoditelje,
       roditeljiZajedno: ucenik.roditeljiZajedno,
