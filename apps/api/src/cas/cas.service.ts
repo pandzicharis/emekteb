@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatusPrisustva, TipCasa } from '@prisma/client';
+import { SlobodanDanService } from '../slobodan-dan/slobodan-dan.service';
 
 export type PrisustvoStatus = 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN';
 export type TipCasaInput = 'LEKCIJA' | 'PROVJERA' | 'POSEBNO';
@@ -28,7 +29,11 @@ export interface CreateCasPayload {
 
 @Injectable()
 export class CasService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => SlobodanDanService))
+    private readonly slobodanDanService: SlobodanDanService,
+  ) {}
 
   /**
    * Kreira novi čas za dati slot (raspored).
@@ -82,6 +87,15 @@ export class CasService {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       datumCas = today;
+    }
+
+    // Provjeri da li je datum slobodan dan
+    datumCas.setHours(0, 0, 0, 0);
+    const slobodanDanCheck = await this.slobodanDanService.isSlobodanDan(nastavnaGodina.id, datumCas);
+    if (slobodanDanCheck.isSlobodan) {
+      throw new BadRequestException(
+        `Ne možete kreirati čas za ${datumCas.toLocaleDateString('bs-BA')}. Ovaj dan je slobodan dan - ${slobodanDanCheck.razlog}`,
+      );
     }
 
     // Datum kreiranja (createdAt) – ako dođe sa frontenda, koristimo njega, inače default now()
@@ -265,6 +279,9 @@ export class CasService {
   async update(id: string, payload: CreateCasPayload) {
     const existing = await this.prisma.cas.findUnique({
       where: { id },
+      include: {
+        nastavnaGodina: true,
+      },
     });
     if (!existing) {
       throw new NotFoundException('Čas nije pronađen');
@@ -277,6 +294,15 @@ export class CasService {
         throw new BadRequestException('Neispravan format datuma');
       }
       datumCas = d;
+      datumCas.setHours(0, 0, 0, 0);
+
+      // Provjeri da li je novi datum slobodan dan (samo ako se mijenja datum)
+      const slobodanDanCheck = await this.slobodanDanService.isSlobodanDan(existing.nastavnaGodinaId, datumCas);
+      if (slobodanDanCheck.isSlobodan) {
+        throw new BadRequestException(
+          `Ne možete ažurirati čas za ${datumCas.toLocaleDateString('bs-BA')}. Ovaj dan je slobodan dan - ${slobodanDanCheck.razlog}`,
+        );
+      }
     }
 
     const tipoviCasa: TipCasa[] = Array.from(

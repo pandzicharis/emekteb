@@ -149,12 +149,13 @@ export class CasController {
     }
 
     // Pronađi SVE rasporede za ovog muallima u ovoj nastavnoj godini
+    // STRICT FILTER: samo rasporedi gdje je muallimId jednak muallimUcenikId
     const rasporedi = await this.prisma.raspored.findMany({
       where: {
         grupa: {
           razredNastavnaGodina: {
             nastavnaGodinaId: nastavnaGodina.id,
-            muallimId: muallimUcenikId,
+            muallimId: muallimUcenikId, // STRICT: samo slotovi ovog muallima
           },
         },
       },
@@ -180,7 +181,23 @@ export class CasController {
       },
     });
 
-    if (rasporedi.length === 0) {
+    // STRICT FILTER: Dodatna provjera - filtriraj samo rasporede koji stvarno pripadaju ovom muallimu
+    // Ovo osigurava da čak i ako Prisma query propusti neki raspored, mi ga filtriramo
+    const validRasporedi = rasporedi.filter((r) => {
+      const actualMuallimId = r.grupa.razredNastavnaGodina.muallimId;
+      const isValid = actualMuallimId === muallimUcenikId;
+      if (!isValid) {
+        console.error(`[CasController] STRICT FILTER: Removing raspored ${r.id} - belongs to muallim ${actualMuallimId}, not ${muallimUcenikId}`);
+      }
+      return isValid;
+    });
+    
+    console.log(`[CasController] Found ${rasporedi.length} rasporedi, ${validRasporedi.length} valid for muallim ${muallimUcenikId}`);
+    
+    // Koristi samo validne rasporede - STRICT FILTER
+    const filteredRasporedi = validRasporedi;
+
+    if (filteredRasporedi.length === 0) {
       return {
         nastavnaGodina: {
           id: nastavnaGodina.id,
@@ -192,8 +209,8 @@ export class CasController {
       };
     }
 
-    // Pronađi sve časove u nastavnoj godini
-    const rasporedIds = rasporedi.map((r) => r.id);
+    // Pronađi sve časove u nastavnoj godini - samo za validne rasporede
+    const rasporedIds = filteredRasporedi.map((r) => r.id);
     const casovi = await this.prisma.cas.findMany({
       where: {
         rasporedId: { in: rasporedIds },
@@ -242,7 +259,8 @@ export class CasController {
     const skolaHifzaCasoviMap = new Map<string, any>();
     if (skolaHifza) {
       // Pronađi sve SkolaHifza slotove koji pripadaju rasporedima ovog muallima
-      const skolaHifzaRasporediIds = rasporedi
+      // STRICT: koristi samo filteredRasporedi
+      const skolaHifzaRasporediIds = filteredRasporedi
         .filter((r) => r.grupa.razredNastavnaGodina.razred.ilmihal === 'SKOLA_HIFZA')
         .map((r) => r.id);
 
@@ -305,8 +323,8 @@ export class CasController {
         const dateKey = current.toISOString().split('T')[0];
         const dan = dayOfWeek === 6 ? 'subota' : 'nedjelja';
 
-        // Pronađi sve rasporede za ovaj dan
-        const danRasporedi = rasporedi.filter((r) => r.dan === dan);
+        // Pronađi sve rasporede za ovaj dan - STRICT: koristi samo filteredRasporedi
+        const danRasporedi = filteredRasporedi.filter((r) => r.dan === dan);
 
         for (const raspored of danRasporedi) {
           const casKey = `${raspored.id}-${dateKey}`;
@@ -389,6 +407,12 @@ export class CasController {
       current.setDate(current.getDate() + 1);
     }
 
+    // Dohvati slobodne dane za nastavnu godinu
+    const slobodniDani = await this.prisma.slobodanDan.findMany({
+      where: { nastavnaGodinaId: nastavnaGodina.id },
+      orderBy: { datum: 'asc' },
+    });
+
     return {
       nastavnaGodina: {
         id: nastavnaGodina.id,
@@ -397,6 +421,10 @@ export class CasController {
         datumDo: nastavnaGodina.datumDo.toISOString().split('T')[0],
       },
       casovi: result,
+      slobodniDani: slobodniDani.map((sd) => ({
+        datum: sd.datum.toISOString().split('T')[0], // YYYY-MM-DD format
+        razlog: sd.razlog,
+      })),
     };
   }
 }

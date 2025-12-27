@@ -44,11 +44,22 @@ interface Cas {
   imaCas: boolean;
 }
 
+interface SlobodanDan {
+  datum: string; // YYYY-MM-DD format
+  razlog: string;
+}
+
 interface NastavnaGodina {
   id: string;
   naziv: string;
   datumOd: string;
   datumDo: string;
+}
+
+interface CasoviResponse {
+  nastavnaGodina: NastavnaGodina | null;
+  casovi: Cas[];
+  slobodniDani?: SlobodanDan[];
 }
 
 export default function CasoviPage() {
@@ -57,6 +68,7 @@ export default function CasoviPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [casovi, setCasovi] = useState<Cas[]>([]);
   const [nastavnaGodina, setNastavnaGodina] = useState<NastavnaGodina | null>(null);
+  const [slobodniDani, setSlobodniDani] = useState<SlobodanDan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCas, setSelectedCas] = useState<Cas | null>(null);
@@ -65,6 +77,26 @@ export default function CasoviPage() {
   const [showCasDrawer, setShowCasDrawer] = useState(false);
   const [selectedSlotForDrawer, setSelectedSlotForDrawer] = useState<RasporedItem | null>(null);
   const [selectedSlotDate, setSelectedSlotDate] = useState<Date | null>(null);
+
+  // Helper funkcije za slobodne dane
+  const formatDateForComparison = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const isSlobodanDan = (datum: Date): boolean => {
+    if (!slobodniDani.length) return false;
+    const dateStr = formatDateForComparison(datum);
+    return slobodniDani.some((sd) => sd.datum === dateStr);
+  };
+
+  const getSlobodanDanInfo = (datum: Date): SlobodanDan | null => {
+    if (!slobodniDani.length) return null;
+    const dateStr = formatDateForComparison(datum);
+    return slobodniDani.find((sd) => sd.datum === dateStr) || null;
+  };
 
   // Helper: pronađi subotu za dati datum (uvijek ide unazad do prošle subote)
   const getSaturdayForDate = (date: Date) => {
@@ -411,6 +443,7 @@ export default function CasoviPage() {
   }, [view, currentDate]);
 
   // Grupiraj časove po datumu - koristi YYYY-MM-DD format
+  // NOTE: casovi are already filtered by muallim from backend, so all casovi here belong to current muallim
   const casoviByDate = useMemo(() => {
     const map = new Map<string, Cas[]>();
     casovi.forEach((cas) => {
@@ -425,18 +458,23 @@ export default function CasoviPage() {
   }, [casovi]);
 
   // Dohvati sve slotove za nastavnu godinu (jednom, ne ovisno o view-u)
+  // NOTE: Backend endpoint /cas/muallim/range already filters casovi by the authenticated muallim
+  // All casovi returned are only for the current logged-in muallim
   useEffect(() => {
     const fetchCasovi = async () => {
       try {
         setLoading(true);
         setError(null);
         
-        const response = await axios.get(`${API_URL}/cas/muallim/range`);
+        // API endpoint automatically filters by authenticated muallim (see cas.controller.ts line 106-411)
+        const response = await axios.get<CasoviResponse>(`${API_URL}/cas/muallim/range`);
         
         console.log('Received data:', response.data);
         if (response.data) {
           setNastavnaGodina(response.data.nastavnaGodina || null);
           setCasovi(response.data.casovi || []);
+          const slobodniDaniData = response.data.slobodniDani || response.data.nastavnaGodina?.slobodniDani || [];
+          setSlobodniDani(slobodniDaniData);
           
           // Postavi currentDate na prvi vikend dan nastavne godine ako je dostupna
           if (response.data.nastavnaGodina) {
@@ -619,6 +657,18 @@ export default function CasoviPage() {
     return `${days[date.getDay()]}, ${date.getDate()}. ${months[date.getMonth()]} ${date.getFullYear()}`;
   };
 
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const day = date.getDate();
+    const monthNames = [
+      'januar', 'februar', 'mart', 'april', 'maj', 'jun',
+      'jul', 'avgust', 'septembar', 'oktobar', 'novembar', 'decembar'
+    ];
+    const month = monthNames[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day}. ${month} ${year}`;
+  };
+
   const getDateTitle = () => {
     if (view === 'month') return formatMonthYear(currentDate);
     if (view === 'week') return formatWeekRange(currentDate);
@@ -719,18 +769,28 @@ export default function CasoviPage() {
                 : [];
 
               const isCurrentMonth = date.getMonth() === currentDate.getMonth();
+              const isDateSlobodanDan = isSlobodanDan(date);
 
               return (
                 <div
                   key={dateKey}
                   className={`min-h-[120px] border-b border-r border-gray-200 p-3 transition-colors ${
-                    isCurrentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50'
+                    isDateSlobodanDan
+                      ? 'bg-red-50/80 border-red-200'
+                      : isCurrentMonth
+                      ? 'bg-white hover:bg-gray-50'
+                      : 'bg-gray-50/50'
                   }`}
                 >
                   <div className="mb-3 flex items-baseline gap-1.5">
+                    {isDateSlobodanDan && (
+                      <div className="w-2 h-2 rounded-full bg-red-600 mr-1 flex-shrink-0 mt-1"></div>
+                    )}
                     <div
                       className={`text-xl font-bold ${
-                        isCurrentMonth
+                        isDateSlobodanDan
+                          ? 'text-red-700'
+                          : isCurrentMonth
                           ? 'text-gray-900'
                           : 'text-gray-400'
                       }`}
@@ -747,6 +807,16 @@ export default function CasoviPage() {
                       {['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'avg', 'sep', 'okt', 'nov', 'dec'][date.getMonth()]}
                     </div>
                   </div>
+                  {isDateSlobodanDan && (
+                    <div className="mb-2">
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">
+                        <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        Slobodan dan
+                      </span>
+                    </div>
+                  )}
                       <div className="space-y-1.5">
                     {dayCasovi.slice(0, 5).map((cas) => {
                       const [h, m] = cas.raspored.slot.split(':').map(Number);
@@ -862,11 +932,16 @@ export default function CasoviPage() {
           {days.map((date, idx) => {
             const isToday = date.toDateString() === new Date().toDateString();
             const dayName = idx === 0 ? 'Subota' : 'Nedjelja';
+            const isDateSlobodanDan = isSlobodanDan(date);
             return (
               <div
                 key={idx}
                 className={`flex-1 border-b-2 h-16 border-r border-gray-200 last:border-r-0 flex flex-col items-center justify-center ${
-                  isToday ? 'bg-blue-50' : 'bg-white'
+                  isDateSlobodanDan
+                    ? 'bg-red-50 border-red-300'
+                    : isToday
+                    ? 'bg-blue-50'
+                    : 'bg-white'
                 }`}
               >
                 <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-0.5 flex items-center justify-center gap-1.5">
@@ -875,9 +950,16 @@ export default function CasoviPage() {
                   </svg>
                   {dayName}
                 </div>
+                {isDateSlobodanDan && (
+                  <div className="w-2 h-2 rounded-full bg-red-600 mb-1"></div>
+                )}
                 <div
                   className={`text-2xl font-bold ${
-                    isToday ? 'text-blue-600' : 'text-gray-900'
+                    isDateSlobodanDan
+                      ? 'text-red-700'
+                      : isToday
+                      ? 'text-blue-600'
+                      : 'text-gray-900'
                   }`}
                 >
                   {date.getDate()}
@@ -1042,7 +1124,7 @@ export default function CasoviPage() {
             return (
               <div
                 key={dateKey}
-                className="flex-1 border-r border-gray-200 last:border-r-0 bg-white"
+                className={`flex-1 border-r border-gray-200 last:border-r-0 ${isSlobodanDan(date) ? 'bg-red-50/30' : 'bg-white'}`}
               >
                 <div className="relative" style={{ height: `${TIMELINE_HEIGHT}px` }}>
                   {/* Hour grid lines */}
@@ -1283,7 +1365,7 @@ export default function CasoviPage() {
     return (
       <div className="flex-1 overflow-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:hover:bg-gray-400 [&::-webkit-scrollbar-track]:bg-gray-50">
         {/* Header sa danom */}
-        <div className="flex border-b-2 border-gray-300 bg-gradient-to-b from-gray-50 to-white sticky top-0 z-10 shadow-sm h-16">
+        <div className={`flex border-b-2 ${isSlobodanDan(currentDate) ? 'border-red-300 bg-gradient-to-b from-red-50 to-red-50/50' : 'border-gray-300 bg-gradient-to-b from-gray-50 to-white'} sticky top-0 z-10 shadow-sm h-16`}>
           <div className="w-20 h-16 border-r border-gray-300 bg-gray-50 flex items-center justify-center">
             <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1294,7 +1376,7 @@ export default function CasoviPage() {
               <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              <div className="text-base font-semibold text-gray-700 uppercase tracking-wide">{formatDay(currentDate)}</div>
+              <div className={`text-base font-semibold ${isSlobodanDan(currentDate) ? 'text-red-700' : 'text-gray-700'} uppercase tracking-wide`}>{formatDay(currentDate)}</div>
             </div>
           </div>
         </div>
@@ -1658,6 +1740,48 @@ export default function CasoviPage() {
           </div>
         </div>
 
+        {/* Slobodan dan banner - ako je trenutno prikazani datum slobodan dan */}
+        {(() => {
+          const dateToCheck = new Date(currentDate);
+          dateToCheck.setHours(0, 0, 0, 0);
+          
+          // Provjeri da li je trenutno prikazani datum slobodan dan
+          if (isSlobodanDan(dateToCheck)) {
+            const info = getSlobodanDanInfo(dateToCheck);
+            
+            if (info) {
+              const day = dateToCheck.getDate();
+              const monthNames = [
+                'januar', 'februar', 'mart', 'april', 'maj', 'jun',
+                'jul', 'avgust', 'septembar', 'oktobar', 'novembar', 'decembar'
+              ];
+              const month = monthNames[dateToCheck.getMonth()];
+              const year = dateToCheck.getFullYear();
+              const formattedDate = `${day}. ${month} ${year}`;
+              
+              return (
+                <div className="mb-4 rounded-lg bg-red-50 border-l-4 border-red-500 p-4">
+                  <div className="flex items-start">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ml-3 flex-1">
+                      <h3 className="text-sm font-semibold text-red-800">Slobodan dan - nema nastave</h3>
+                      <div className="mt-2 text-sm text-red-700">
+                        <p className="font-medium mb-1">{formattedDate}</p>
+                        <p>{info.razlog || 'Nema navedenog razloga'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+          }
+          return null;
+        })()}
+
         {/* Legenda */}
         <div className="mb-4 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Legenda</h3>
@@ -1785,10 +1909,11 @@ export default function CasoviPage() {
             onSave={async () => {
               // Nakon spremanja, osvježi podatke
               try {
-                const response = await axios.get(`${API_URL}/cas/muallim/range`);
+                const response = await axios.get<CasoviResponse>(`${API_URL}/cas/muallim/range`);
                 if (response.data) {
                   setNastavnaGodina(response.data.nastavnaGodina || null);
                   setCasovi(response.data.casovi || []);
+                  setSlobodniDani(response.data.slobodniDani || []);
                 }
               } catch (err) {
                 console.error('Error refreshing casovi:', err);
@@ -1808,10 +1933,11 @@ export default function CasoviPage() {
             onSave={async () => {
               // Nakon spremanja, osvježi podatke
               try {
-                const response = await axios.get(`${API_URL}/cas/muallim/range`);
+                const response = await axios.get<CasoviResponse>(`${API_URL}/cas/muallim/range`);
                 if (response.data) {
                   setNastavnaGodina(response.data.nastavnaGodina || null);
                   setCasovi(response.data.casovi || []);
+                  setSlobodniDani(response.data.slobodniDani || []);
                 }
               } catch (err) {
                 console.error('Error refreshing casovi:', err);

@@ -447,6 +447,142 @@ export class MuallimService {
       };
     });
 
+    // Provjeri da li je muallim dodijeljen školi hifza kroz SkolaHifzaMuallim tabelu
+    // i dodaj školu hifza u listu razreda ako postoji
+    const skolaHifzaMuallim = await this.prisma.skolaHifzaMuallim.findFirst({
+      where: {
+        muallimId: muallimUcenikId,
+        skolaHifza: {
+          nastavnaGodinaId: nastavnaGodina.id,
+        },
+      },
+      include: {
+        skolaHifza: {
+          include: {
+            ucenici: {
+              where: { muallimId: muallimUcenikId },
+              include: {
+                ucenik: {
+                  select: {
+                    id: true,
+                    datumRodjenja: true,
+                    korisnik: {
+                      select: {
+                        id: true,
+                        ime: true,
+                        prezime: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Ako je muallim dodijeljen školi hifza, dodaj je u listu razreda
+    if (skolaHifzaMuallim) {
+      // Pronađi razred sa SKOLA_HIFZA ilmihalom
+      const skolaHifzaRazred = await this.prisma.razred.findFirst({
+        where: { ilmihal: 'SKOLA_HIFZA' },
+      });
+
+      if (skolaHifzaRazred) {
+        // Pronađi rasporede za školu hifza gdje je muallim zadužen
+        const skolaHifzaRasporedi = await this.prisma.raspored.findMany({
+          where: {
+            grupa: {
+              razredNastavnaGodina: {
+                nastavnaGodinaId: nastavnaGodina.id,
+                razredId: skolaHifzaRazred.id,
+              },
+            },
+          },
+          include: {
+            grupa: {
+              include: {
+                ucenici: {
+                  where: {
+                    ucenik: {
+                      skolaHifzaUcenici: {
+                        some: {
+                          skolaHifzaId: skolaHifzaMuallim.skolaHifza.id,
+                          muallimId: muallimUcenikId,
+                        },
+                      },
+                    },
+                  },
+                  include: {
+                    ucenik: {
+                      select: {
+                        id: true,
+                        datumRodjenja: true,
+                        korisnik: {
+                          select: {
+                            id: true,
+                            ime: true,
+                            prezime: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        // Grupiši rasporede po grupama
+        const grupeMap = new Map<string, any>();
+        skolaHifzaRasporedi.forEach((raspored) => {
+          const grupaId = raspored.grupa.id;
+          if (!grupeMap.has(grupaId)) {
+            grupeMap.set(grupaId, {
+              id: grupaId,
+              naziv: raspored.grupa.naziv,
+              kuran: raspored.grupa.kuran,
+              sufara: raspored.grupa.sufara,
+              brojUcenika: raspored.grupa.ucenici.length,
+              raspored: [raspored],
+              ucenici: raspored.grupa.ucenici.map((ug) => ({
+                id: ug.ucenik.id,
+                ime: ug.ucenik.korisnik?.ime ?? null,
+                prezime: ug.ucenik.korisnik?.prezime ?? null,
+                godinaRodjenja: ug.ucenik.datumRodjenja
+                  ? new Date(ug.ucenik.datumRodjenja).getFullYear()
+                  : null,
+              })),
+            });
+          } else {
+            const grupa = grupeMap.get(grupaId);
+            grupa.raspored.push(raspored);
+          }
+        });
+
+        const grupe = Array.from(grupeMap.values());
+        const ukupnoUcenika = grupe.reduce((sum, grupa) => sum + grupa.brojUcenika, 0);
+
+        // Dodaj školu hifza u listu razreda samo ako već ne postoji
+        const skolaHifzaExists = razredi.some((r) => r.razred.ilmihal === 'SKOLA_HIFZA');
+        if (!skolaHifzaExists) {
+          razredi.push({
+            id: `skola-hifza-${skolaHifzaMuallim.skolaHifza.id}`, // Virtualni ID
+            razred: {
+              id: skolaHifzaRazred.id,
+              name: skolaHifzaRazred.name || 'Škola hifza',
+              ilmihal: 'SKOLA_HIFZA',
+            },
+            split: false,
+            ukupnoUcenika,
+            grupe,
+          });
+        }
+      }
+    }
+
     // Odredi dan za raspored (subota ili nedjelja)
     // Prioritet: selectedDay (eksplicitno odabran) -> derivedDay (iz datuma) -> današnji vikend dan
     let danZaRaspored: 'subota' | 'nedjelja';
@@ -463,12 +599,13 @@ export class MuallimService {
     }
 
     // Pronađi SVE rasporede (za statistike i ukupne sate), bez obzira na dan
+    // STRICT FILTER: samo rasporedi gdje je muallimId jednak muallimUcenikId
     const sviRasporedi = await this.prisma.raspored.findMany({
       where: {
         grupa: {
           razredNastavnaGodina: {
             nastavnaGodinaId: nastavnaGodina.id,
-            muallimId: muallimUcenikId,
+            muallimId: muallimUcenikId, // STRICT: samo slotovi ovog muallima
           },
         },
       },
@@ -511,9 +648,26 @@ export class MuallimService {
       },
     });
 
+    // STRICT FILTER: Dodatna provjera - filtriraj samo rasporede koji stvarno pripadaju ovom muallimu
+    // Ovo osigurava da čak i ako Prisma query propusti neki raspored, mi ga filtriramo
+    const validRasporedi = sviRasporedi.filter((r) => {
+      const actualMuallimId = r.grupa.razredNastavnaGodina.muallimId;
+      const isValid = actualMuallimId === muallimUcenikId;
+      if (!isValid) {
+        console.error(`[MuallimService] STRICT FILTER: Removing raspored ${r.id} - belongs to muallim ${actualMuallimId}, not ${muallimUcenikId}`);
+      }
+      return isValid;
+    });
+    
+    console.log(`[MuallimService] Found ${sviRasporedi.length} rasporedi, ${validRasporedi.length} valid for muallim ${muallimUcenikId}`);
+    
+    // Koristi samo validne rasporede - STRICT FILTER
+    const filteredRasporedi = validRasporedi;
+
     // Pronađi časove za ove rasporede – za izabrani datum (ili današnji)
     // kako bismo označili slotove (imaUnosCasa) i uzeli zadnji unos za taj dan.
-    const rasporedIds = sviRasporedi.map((r) => r.id);
+    // STRICT: koristi samo filteredRasporedi
+    const rasporedIds = filteredRasporedi.map((r) => r.id);
     let completedRasporediIds = new Set<string>();
     let casIdByRaspored = new Map<string, string>();
 
@@ -595,12 +749,14 @@ export class MuallimService {
     };
 
     // Pripremi timeline podatke - filtriraj po danu za prikaz kalendara
-    const raspored = sviRasporedi
+    // STRICT: koristi samo filteredRasporedi
+    const raspored = filteredRasporedi
       .filter((r) => r.dan === danZaRaspored)
       .map(mapRaspored);
 
     // Svi rasporedi za statistike (bez filtriranja po danu)
-    const sviRasporediZaStatistike = sviRasporedi.map(mapRaspored);
+    // STRICT: koristi samo filteredRasporedi
+    const sviRasporediZaStatistike = filteredRasporedi.map(mapRaspored);
 
     // Izračunaj statistike - koristi SVE rasporede za tačne statistike
     const statistike = {
@@ -609,6 +765,45 @@ export class MuallimService {
       ukupnoGrupa: razredi.reduce((sum, r) => sum + r.grupe.length, 0),
       danasnjiCasovi: raspored.length, // Filtrirani raspored za odabrani dan
     };
+
+    // Dohvati slobodne dane za nastavnu godinu
+    console.log('🔍 [MuallimService] Fetching slobodni dani for nastavnaGodina:', nastavnaGodina.id);
+    const slobodniDani = await this.prisma.slobodanDan.findMany({
+      where: {
+        nastavnaGodinaId: nastavnaGodina.id,
+      },
+      select: {
+        datum: true,
+        razlog: true,
+      },
+      orderBy: {
+        datum: 'asc',
+      },
+    });
+
+    console.log('📅 [MuallimService] Found slobodni dani:', {
+      count: slobodniDani.length,
+      slobodniDani: slobodniDani.map((sd) => ({
+        datum: sd.datum.toISOString(),
+        razlog: sd.razlog,
+      })),
+    });
+
+    // Formatiraj slobodne dane u format koji frontend očekuje
+    const slobodniDaniFormatted = slobodniDani.map((sd) => {
+      const formatted = {
+        datum: sd.datum.toISOString().split('T')[0], // YYYY-MM-DD format
+        razlog: sd.razlog,
+      };
+      console.log('📅 [MuallimService] Formatting slobodan dan:', {
+        original: sd.datum.toISOString(),
+        formatted: formatted.datum,
+        razlog: formatted.razlog,
+      });
+      return formatted;
+    });
+
+    console.log('✅ [MuallimService] Formatted slobodni dani:', slobodniDaniFormatted);
 
     return {
       nastavnaGodina: {
@@ -624,6 +819,7 @@ export class MuallimService {
       sviRasporedi: sviRasporediZaStatistike, // Svi slotovi za statistike
       statistike,
       odabraniDan: danZaRaspored,
+      slobodniDani: slobodniDaniFormatted,
     };
   }
 }

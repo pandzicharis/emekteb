@@ -366,6 +366,7 @@ model NastavnaGodina {
     razredi      RazredNastavnaGodina[]
     cas          Cas[]
     skolaHifza   SkolaHifza?
+    slobodniDani SlobodanDan[]
 
     @@map("nastavne_godine")
 }
@@ -617,4 +618,23 @@ model SkolaHifzaPrisustvo {
 
     @@unique([casId, ucenikId])
     @@map("skola_hifza_prisustva")
+}
+
+// ============================================
+// SLOBODNI DANI
+// ============================================
+
+model SlobodanDan {
+    id               String   @id @default(uuid())
+    nastavnaGodinaId String
+    datum            DateTime // Date only (bez vremena)
+    razlog           String
+    kreiran          DateTime @default(now())
+    azuriran         DateTime @updatedAt
+
+    // Relacije
+    nastavnaGodina NastavnaGodina @relation(fields: [nastavnaGodinaId], references: [id], onDelete: Cascade)
+
+    @@unique([nastavnaGodinaId, datum])
+    @@map("slobodni_dani")
 }

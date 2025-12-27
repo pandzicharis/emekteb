@@ -35,13 +35,13 @@ npx prisma generate
 echo "🗄️  Running database migrations..."
 npx prisma migrate deploy
 
-echo "🌱 Seeding database..."
-
-echo "  📝 Seeding korisnici, razredi i lekcije (KURAN i SUFARA)..."
-if ! npm run prisma:seed; then
-  echo "❌ Greška pri seed-u"
-  exit 1
-fi
+# Seed je isključen
+# echo "🌱 Seeding database..."
+# echo "  📝 Seeding korisnici, razredi i lekcije (KURAN i SUFARA)..."
+# if ! npm run prisma:seed; then
+#   echo "❌ Greška pri seed-u"
+#   exit 1
+# fi
 
 echo "✅ Database initialization complete!"
 

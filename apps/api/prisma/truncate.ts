@@ -83,6 +83,9 @@ async function main() {
     await prisma.razred.deleteMany({});
     console.log('✅ Obrisani razredi');
 
+    await prisma.slobodanDan.deleteMany({});
+    console.log('✅ Obrisani slobodni dani');
+
     await prisma.nastavnaGodina.deleteMany({});
     console.log('✅ Obrisane nastavne godine');
 

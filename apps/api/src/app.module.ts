@@ -13,9 +13,10 @@ import { CasModule } from './cas/cas.module';
 import { UcenikModule } from './ucenik/ucenik.module';
 import { SkolaHifzaModule } from './skola-hifza/skola-hifza.module';
 import { ReportsModule } from './reports/reports.module';
+import { SlobodanDanModule } from './slobodan-dan/slobodan-dan.module';
 
 @Module({
-  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule, CasModule, UcenikModule, SkolaHifzaModule, ReportsModule],
+  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule, CasModule, UcenikModule, SkolaHifzaModule, ReportsModule, SlobodanDanModule],
   controllers: [AppController],
   providers: [AppService],
 })

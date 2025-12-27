@@ -1,9 +1,14 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SlobodanDanService } from '../slobodan-dan/slobodan-dan.service';
 
 @Injectable()
 export class SkolaHifzaService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => SlobodanDanService))
+    private readonly slobodanDanService: SlobodanDanService,
+  ) {}
 
   /**
    * Pronađi ili kreiraj SkolaHifza zapis za nastavnu godinu
@@ -232,6 +237,18 @@ export class SkolaHifzaService {
 
     // Parsiraj datum
     const datumObj = new Date(datum);
+    if (isNaN(datumObj.getTime())) {
+      throw new BadRequestException('Neispravan format datuma');
+    }
+    datumObj.setHours(0, 0, 0, 0);
+
+    // Provjeri da li je datum slobodan dan
+    const slobodanDanCheck = await this.slobodanDanService.isSlobodanDan(skolaHifza.nastavnaGodinaId, datumObj);
+    if (slobodanDanCheck.isSlobodan) {
+      throw new BadRequestException(
+        `Ne možete kreirati čas za ${datumObj.toLocaleDateString('bs-BA')}. Ovaj dan je slobodan dan - ${slobodanDanCheck.razlog}`,
+      );
+    }
 
     // Kreiraj cas
     const cas = await this.prisma.skolaHifzaCas.create({
