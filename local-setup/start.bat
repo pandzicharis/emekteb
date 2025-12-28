@@ -149,7 +149,7 @@ echo       Password: password123
 echo       PIN:      0000
 echo.
 echo    👤 Muallim:
-echo       Email:    muhidin.topcagic@emekteb.ba
+echo       Email:    muallim@emekteb.ba
 echo       Password: password123
 echo       PIN:      1234
 echo.

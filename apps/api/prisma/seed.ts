@@ -1,4 +1,4 @@
-import { PrismaClient, Uloga, Ilmihal, TipLekcije, Spol, StatusUcenika } from '@prisma/client';
+import { PrismaClient, Uloga, Ilmihal, TipLekcije, Spol, StatusUcenika, Razred, Lekcija, Ucenik } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -49,13 +49,17 @@ async function truncateDatabase() {
 async function main() {
   console.log('🌱 Starting seed process...\n');
 
-  // Provjeri da li je seed već napravljen
+  // Provjeri da li je seed već napravljen - provjeri i ADMIN i MUALLIM
   const existingAdmin = await prisma.korisnik.findFirst({
     where: { uloga: Uloga.ADMIN },
   });
 
-  if (existingAdmin) {
-    console.log('⚠️  Seed je već napravljen (admin postoji).');
+  const existingMuallim = await prisma.korisnik.findFirst({
+    where: { uloga: Uloga.MUALLIM },
+  });
+
+  if (existingAdmin && existingMuallim) {
+    console.log('⚠️  Seed je već napravljen (admin i muallim korisnici postoje).');
     console.log('   Za ponovni seed, prvo pokrenite: npm run prisma:truncate\n');
     return;
   }
@@ -128,7 +132,7 @@ async function main() {
     { name: 'Škola Hifza', ilmihal: Ilmihal.SKOLA_HIFZA },
   ];
 
-  const kreiraniRazredi = [];
+  const kreiraniRazredi: Razred[] = [];
   for (const razredData of razredi) {
     const razred = await prisma.razred.create({
       data: {
@@ -161,7 +165,7 @@ async function main() {
     { naslov: 'Al-Fil', opis: 'Učenje sure Al-Fil', tezina: 6, redoslijed: 10 },
   ];
 
-  const kreiraneKuranLekcije = [];
+  const kreiraneKuranLekcije: Lekcija[] = [];
   for (const lekcijaData of kuranLekcije) {
     const lekcija = await prisma.lekcija.create({
       data: {
@@ -194,7 +198,7 @@ async function main() {
     { naslov: 'Čitanje - Ekspertni tekstovi', opis: 'Ekspertno čitanje', tezina: 6, redoslijed: 7 },
   ];
 
-  const kreiraneSufaraLekcije = [];
+  const kreiraneSufaraLekcije: Lekcija[] = [];
   for (const lekcijaData of sufaraLekcije) {
     const lekcija = await prisma.lekcija.create({
       data: {
@@ -251,7 +255,7 @@ async function main() {
         return a[0].localeCompare(b[0]);
       });
 
-      const kreiraneHifzaLekcije = [];
+      const kreiraneHifzaLekcije: Lekcija[] = [];
       let redoslijed = 1;
 
       for (const [suraName, brojAjeta] of sureEntries) {
@@ -291,7 +295,7 @@ async function main() {
   const imena = ['Ahmed', 'Fatima', 'Emir', 'Amina', 'Haris', 'Lejla', 'Adnan', 'Emina', 'Dženan', 'Selma'];
   const prezimena = ['Hasanović', 'Mehmedović', 'Alić', 'Kovačević', 'Džafić', 'Begić', 'Suljić', 'Hadžić', 'Osmanović', 'Jusufović'];
 
-  const kreiraniUcenici = [];
+  const kreiraniUcenici: Ucenik[] = [];
   for (let i = 0; i < 10; i++) {
     const ime = imena[i];
     const prezime = prezimena[i];
@@ -327,59 +331,12 @@ async function main() {
 
   console.log(`\n✅ Kreirano ${kreiraniUcenici.length} učenika\n`);
 
-  // ============================================
-  // 7. KREIRANJE ŠKOLE HIFZA
-  // ============================================
-  console.log('📖 Kreiranje Škole Hifza...');
-
-  // Kreiraj nastavnu godinu
-  const nastavniPlan = await prisma.nastavniPlan.create({
-    data: {
-      naziv: 'Osnovni nastavni plan 2024/2025',
-      opis: 'Osnovni nastavni plan za školsku godinu 2024/2025',
-      datumUsvajanja: new Date('2024-09-01'),
-      aktivan: true,
-    },
-  });
-
-  const nastavnaGodina = await prisma.nastavnaGodina.create({
-    data: {
-      naziv: '2024/2025',
-      opis: 'Nastavna godina 2024/2025',
-      datumOd: new Date('2024-09-01'),
-      datumDo: new Date('2025-06-30'),
-      nastavniPlanId: nastavniPlan.id,
-      status: 'ACTIVE',
-    },
-  });
-
-  // Pronađi lekcije za Školu Hifza
+  console.log('\n🎉 Seeding završen!');
+  // Pronađi lekcije za Školu Hifza za statistiku
   const skolaHifzaLekcije = await prisma.lekcija.findMany({
     where: { tip: TipLekcije.SKOLA_HIFZA },
   });
 
-  if (skolaHifzaLekcije.length > 0) {
-    const skolaHifza = await prisma.skolaHifza.create({
-      data: {
-        nastavnaGodinaId: nastavnaGodina.id,
-        lekcije: skolaHifzaLekcije.map(l => l.id),
-      },
-    });
-
-    // Dodaj muallima u Školu Hifza
-    await prisma.skolaHifzaMuallim.create({
-      data: {
-        skolaHifzaId: skolaHifza.id,
-        muallimId: muallimUcenik.id,
-      },
-    });
-
-    console.log('✅ Škola Hifza kreirana sa muallimom\n');
-  } else {
-    console.log('⚠️  Nema lekcija za Školu Hifza, preskačem kreiranje Škole Hifza\n');
-  }
-
-  console.log('\n🎉 Seeding završen!');
   console.log('\n📊 Statistika:');
   console.log(`   - Admin: 1`);
   console.log(`   - Muallim: 1`);
@@ -387,6 +344,7 @@ async function main() {
   console.log(`   - Razredi: ${kreiraniRazredi.length}`);
   console.log(`   - Lekcije Kuran: ${kreiraneKuranLekcije.length}`);
   console.log(`   - Lekcije Sufara: ${kreiraneSufaraLekcije.length}`);
+  console.log(`   - Lekcije Hifz: ${skolaHifzaLekcije.length}`);
   console.log('\n📝 Login credentials:');
   console.log('   Admin: admin@emekteb.ba / password123 / PIN: 0000');
   console.log('   Muallim: muallim@emekteb.ba / password123 / PIN: 1234');

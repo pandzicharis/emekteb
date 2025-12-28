@@ -62,10 +62,57 @@ interface CasoviResponse {
   slobodniDani?: SlobodanDan[];
 }
 
+// Helper funkcija za pronalaženje najbliže subote (može biti prošla ili sljedeća)
+const getNearestSaturday = (date: Date): Date => {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay();
+  
+  // Ako je već subota (6), vrati taj datum
+  if (day === 6) {
+    return d;
+  }
+  
+  // Ako je nedjelja (0), vrati prošlu subotu
+  if (day === 0) {
+    d.setDate(d.getDate() - 1);
+    return d;
+  }
+  
+  // Za ostale dane, nađi najbližu subotu
+  // Ako je danas prije srijede (ponedjeljak, utorak), idi unazad do prošle subote
+  // Ako je danas srijeda ili poslije, idi naprijed do sljedeće subote
+  const daysUntilSaturday = 6 - day;
+  if (daysUntilSaturday <= 3) {
+    // Idi naprijed do sljedeće subote
+    d.setDate(d.getDate() + daysUntilSaturday);
+  } else {
+    // Idi unazad do prošle subote
+    d.setDate(d.getDate() - (7 - daysUntilSaturday));
+  }
+  return d;
+};
+
+// Inicijalizuj currentDate: ako je danas vikend, koristi danas, inače najbližu subotu
+const getInitialDate = (): Date => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = today.getDay();
+  
+  // Ako je danas subota (6) ili nedjelja (0), koristi danas
+  if (day === 6 || day === 0) {
+    return today;
+  }
+  
+  // Inače, koristi najbližu subotu
+  return getNearestSaturday(today);
+};
+
 export default function CasoviPage() {
   const { user } = useAuth();
-  const [view, setView] = useState<ViewType>('month');
-  const [currentDate, setCurrentDate] = useState(new Date());
+  
+  const [view, setView] = useState<ViewType>('day');
+  const [currentDate, setCurrentDate] = useState<Date>(getInitialDate());
   const [casovi, setCasovi] = useState<Cas[]>([]);
   const [nastavnaGodina, setNastavnaGodina] = useState<NastavnaGodina | null>(null);
   const [slobodniDani, setSlobodniDani] = useState<SlobodanDan[]>([]);
@@ -228,7 +275,18 @@ export default function CasoviPage() {
   // - nije nastupio  -> svjetlo ljubičasta
   // - nastupio, nema cas -> žuta
   // - nastupio, ima cas  -> jaka ljubičasta
+  //
+  // SLOBODAN DAN:
+  // - svi slotovi -> crveni
   const getSlotStatusClass = (slotDate: Date, cas: Cas, variant: 'chip' | 'block' = 'block') => {
+    // Provjeri da li je datum slobodan dan - ako jeste, vrati crveni stil
+    const isSlotDateSlobodanDan = isSlobodanDan(slotDate);
+    if (isSlotDateSlobodanDan) {
+      return variant === 'chip'
+        ? 'bg-red-50 border border-red-200 text-red-900'
+        : 'bg-red-50 border border-red-200 text-red-900';
+    }
+
     const isSkolaHifza =
       cas.raspored.grupa.razred.ilmihal === 'SKOLA_HIFZA' ||
       cas.raspored.grupa.razred.ilmihal === 'ŠKOLA HIFZA';
@@ -284,6 +342,12 @@ export default function CasoviPage() {
 
   // Helper za lijevi border (deblji i jača nijansa)
   const getLeftBorderClass = (slotDate: Date, cas: Cas) => {
+    // Provjeri da li je datum slobodan dan - ako jeste, vrati crveni border
+    const isSlotDateSlobodanDan = isSlobodanDan(slotDate);
+    if (isSlotDateSlobodanDan) {
+      return 'border-l-4 border-l-red-600';
+    }
+
     const isSkolaHifza =
       cas.raspored.grupa.razred.ilmihal === 'SKOLA_HIFZA' ||
       cas.raspored.grupa.razred.ilmihal === 'ŠKOLA HIFZA';
@@ -473,19 +537,46 @@ export default function CasoviPage() {
         if (response.data) {
           setNastavnaGodina(response.data.nastavnaGodina || null);
           setCasovi(response.data.casovi || []);
-          const slobodniDaniData = response.data.slobodniDani || response.data.nastavnaGodina?.slobodniDani || [];
+          const slobodniDaniData = response.data.slobodniDani || [];
           setSlobodniDani(slobodniDaniData);
           
-          // Postavi currentDate na prvi vikend dan nastavne godine ako je dostupna
+          // Postavi currentDate na današnji datum (ili najbližu subotu) ako je unutar opsega nastavne godine
+          // Inače, koristi prvi vikend dan nastavne godine
           if (response.data.nastavnaGodina) {
-            const start = new Date(response.data.nastavnaGodina.datumOd);
-            const day = start.getDay();
-            if (day !== 6 && day !== 0) {
-              // Ako nije vikend, idi na prvu subotu
-              const diff = 6 - day;
-              start.setDate(start.getDate() + diff);
+            const nastavnaStart = new Date(response.data.nastavnaGodina.datumOd);
+            nastavnaStart.setHours(0, 0, 0, 0);
+            const nastavnaEnd = new Date(response.data.nastavnaGodina.datumDo);
+            nastavnaEnd.setHours(23, 59, 59, 999);
+            
+            // Provjeri da li je trenutni currentDate (današnji/najbliža subota) unutar opsega
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const day = today.getDay();
+            
+            let targetDate: Date;
+            if (day === 6 || day === 0) {
+              // Ako je danas vikend, koristi danas
+              targetDate = new Date(today);
+            } else {
+              // Inače, koristi najbližu subotu
+              targetDate = getNearestSaturday(today);
             }
-            setCurrentDate(start);
+            
+            // Provjeri da li je targetDate unutar opsega nastavne godine
+            if (targetDate >= nastavnaStart && targetDate <= nastavnaEnd) {
+              // Koristi targetDate (današnji/najbliža subota)
+              setCurrentDate(targetDate);
+            } else {
+              // Ako nije unutar opsega, koristi prvi vikend dan nastavne godine
+              const start = new Date(nastavnaStart);
+              const startDay = start.getDay();
+              if (startDay !== 6 && startDay !== 0) {
+                // Ako nije vikend, idi na prvu subotu
+                const diff = 6 - startDay;
+                start.setDate(start.getDate() + diff);
+              }
+              setCurrentDate(start);
+            }
           }
         }
       } catch (err: unknown) {
@@ -512,13 +603,8 @@ export default function CasoviPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Kada se prebaci na prikaz dana, postavi najbližu subotu
+  // Resetuj filter kada se promijeni view
   useEffect(() => {
-    if (view === 'day') {
-      const saturday = getSaturdayForDate(new Date());
-      setCurrentDate(saturday);
-    }
-    // Resetuj filter kada se promijeni view
     setSelectedFilterDate(null);
   }, [view]);
 
@@ -657,17 +743,6 @@ export default function CasoviPage() {
     return `${days[date.getDay()]}, ${date.getDate()}. ${months[date.getMonth()]} ${date.getFullYear()}`;
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const day = date.getDate();
-    const monthNames = [
-      'januar', 'februar', 'mart', 'april', 'maj', 'jun',
-      'jul', 'avgust', 'septembar', 'oktobar', 'novembar', 'decembar'
-    ];
-    const month = monthNames[date.getMonth()];
-    const year = date.getFullYear();
-    return `${day}. ${month} ${year}`;
-  };
 
   const getDateTitle = () => {
     if (view === 'month') return formatMonthYear(currentDate);
@@ -727,17 +802,11 @@ export default function CasoviPage() {
 
     return (
       <div className="flex-1 overflow-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:hover:bg-gray-400 [&::-webkit-scrollbar-track]:bg-gray-50">
-        <div className="grid grid-cols-2 border-b-2 border-gray-300 bg-gradient-to-b from-gray-50 to-white sticky top-0 z-10 shadow-sm h-16">
-          <div className="h-16 text-center text-sm font-semibold text-gray-700 border-r border-gray-300 uppercase tracking-wide flex items-center justify-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
+        <div className="grid grid-cols-2 border-b-2 border-gray-300 bg-white sticky top-0 z-10 shadow-sm h-16">
+          <div className="h-16 text-center text-sm font-semibold text-gray-700 border-r border-gray-300 uppercase tracking-wide flex items-center justify-center">
             Subota
           </div>
-          <div className="h-16 text-center text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center justify-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
+          <div className="h-16 text-center text-sm font-semibold text-gray-700 uppercase tracking-wide flex items-center justify-center">
             Nedjelja
           </div>
         </div>
@@ -837,6 +906,7 @@ export default function CasoviPage() {
 
                       const slotDate = new Date(date);
                       slotDate.setHours(0, 0, 0, 0);
+                      const isSlotDateSlobodanDan = isSlobodanDan(slotDate);
                       
                       return (
                         <button
@@ -850,10 +920,15 @@ export default function CasoviPage() {
                           <div className="space-y-1">
                             {/* Početak - Završetak */}
                             <div className="flex items-center gap-1.5">
+                              {isSlotDateSlobodanDan && (
+                                <svg className="w-3 h-3 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                              )}
                               <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                               </svg>
-                              <span className="font-semibold">
+                              <span className={`font-semibold ${isSlotDateSlobodanDan ? 'text-red-900' : ''}`}>
                                 {startTime} - {endTime}
                               </span>
                             </div>
@@ -923,11 +998,8 @@ export default function CasoviPage() {
     return (
       <div className="flex-1 overflow-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:hover:bg-gray-400 [&::-webkit-scrollbar-track]:bg-gray-50">
         {/* Header sa danima (mali, sticky) */}
-        <div className="flex bg-gradient-to-b from-gray-50 to-white sticky top-0 z-10 shadow-sm h-16 border-b-[3px] border-gray-300">
-          <div className="w-20 h-16 border-r border-gray-300 bg-gray-50 flex items-center justify-center">
-            <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+        <div className="flex bg-white sticky top-0 z-10 shadow-sm h-16 border-b-[3px] border-gray-300">
+          <div className="w-20 h-16 border-r border-gray-300 bg-white flex items-center justify-center">
           </div>
           {days.map((date, idx) => {
             const isToday = date.toDateString() === new Date().toDateString();
@@ -944,10 +1016,7 @@ export default function CasoviPage() {
                     : 'bg-white'
                 }`}
               >
-                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-0.5 flex items-center justify-center gap-1.5">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
+                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-0.5 flex items-center justify-center">
                   {dayName}
                 </div>
                 {isDateSlobodanDan && (
@@ -1207,6 +1276,7 @@ export default function CasoviPage() {
 
                     const slotDateForClick = new Date(date);
                     slotDateForClick.setHours(0, 0, 0, 0);
+                    const isSlotDateSlobodanDan = isSlobodanDan(slotDate);
                     
                     return (
                       <button
@@ -1231,10 +1301,15 @@ export default function CasoviPage() {
                         <div className="space-y-1">
                           {/* Početak - Završetak */}
                           <div className="flex items-center gap-1.5">
+                            {isSlotDateSlobodanDan && (
+                              <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                              </svg>
+                            )}
                             <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            <span className={`font-semibold ${isActive ? 'text-white' : ''}`}>
+                            <span className={`font-semibold ${isActive ? 'text-white' : isSlotDateSlobodanDan ? 'text-red-900' : ''}`}>
                               {cas.raspored.slot} - {endTime}
                             </span>
                           </div>
@@ -1365,19 +1440,11 @@ export default function CasoviPage() {
     return (
       <div className="flex-1 overflow-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:hover:bg-gray-400 [&::-webkit-scrollbar-track]:bg-gray-50">
         {/* Header sa danom */}
-        <div className={`flex border-b-2 ${isSlobodanDan(currentDate) ? 'border-red-300 bg-gradient-to-b from-red-50 to-red-50/50' : 'border-gray-300 bg-gradient-to-b from-gray-50 to-white'} sticky top-0 z-10 shadow-sm h-16`}>
-          <div className="w-20 h-16 border-r border-gray-300 bg-gray-50 flex items-center justify-center">
-            <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+        <div className={`flex border-b-2 ${isSlobodanDan(currentDate) ? 'border-red-300 bg-red-50' : 'border-gray-300 bg-white'} sticky top-0 z-10 shadow-sm h-16`}>
+          <div className="w-20 h-16 border-r border-gray-300 bg-white flex items-center justify-center">
           </div>
           <div className="flex-1 h-16 flex items-center justify-center">
-            <div className="flex items-center justify-center gap-2">
-              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <div className={`text-base font-semibold ${isSlobodanDan(currentDate) ? 'text-red-700' : 'text-gray-700'} uppercase tracking-wide`}>{formatDay(currentDate)}</div>
-            </div>
+            <div className={`text-base font-semibold ${isSlobodanDan(currentDate) ? 'text-red-700' : 'text-gray-700'} uppercase tracking-wide`}>{formatDay(currentDate)}</div>
           </div>
         </div>
 
@@ -1522,6 +1589,7 @@ export default function CasoviPage() {
                 
                 const slotDateForClick = new Date(currentDate);
                 slotDateForClick.setHours(0, 0, 0, 0);
+                const isSlotDateSlobodanDan = isSlobodanDan(slotDate);
                 
                 return (
                   <button
@@ -1545,10 +1613,15 @@ export default function CasoviPage() {
                     <div className="space-y-0.5">
                       {/* Početak - Završetak */}
                       <div className="flex items-center gap-1.5">
+                        {isSlotDateSlobodanDan && (
+                          <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                        )}
                         <svg className={`w-3 h-3 flex-shrink-0 ${isActive ? 'text-white' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <span className={`font-semibold ${isActive ? 'text-white' : ''}`}>
+                        <span className={`font-semibold ${isActive ? 'text-white' : isSlotDateSlobodanDan ? 'text-red-900' : ''}`}>
                           {cas.raspored.slot} - {endTime}
                         </span>
                       </div>
@@ -1606,7 +1679,7 @@ export default function CasoviPage() {
   }
 
   return (
-    <div className="bg-gray-50 min-h-full p-6 lg:p-10">
+    <div className="bg-white min-h-full p-6 lg:p-10">
       <div className="w-full max-w-none mx-auto flex-1 flex flex-col">
         {/* Header */}
         <div className="mb-6">
@@ -1643,10 +1716,7 @@ export default function CasoviPage() {
                   </button>
                 </div>
               </div>
-              <div className="ml-2 flex items-center gap-2 text-lg font-semibold text-gray-900">
-                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
+              <div className="ml-2 text-lg font-semibold text-gray-900">
                 {getDateTitle()}
               </div>
             </div>
@@ -1693,47 +1763,38 @@ export default function CasoviPage() {
               <div className="flex items-center gap-0 border border-gray-300 rounded-lg overflow-hidden bg-white shadow-sm">
                 <button
                   onClick={() => setView('month')}
-                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 ${
                     view === 'month'
                       ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
                       : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
                   }`}
                   title="Mjesečni prikaz"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                  </svg>
-                  <span>Mjesec</span>
+                  Mjesec
                 </button>
                 <div className="h-6 w-px bg-gray-200"></div>
                 <button
                   onClick={() => setView('week')}
-                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 ${
                     view === 'week'
                       ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
                       : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
                   }`}
                   title="Sedmični prikaz"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                  </svg>
-                  <span>Sedmica</span>
+                  Sedmica
                 </button>
                 <div className="h-6 w-px bg-gray-200"></div>
                 <button
                   onClick={() => setView('day')}
-                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 flex items-center gap-2 ${
+                  className={`relative px-4 py-2.5 text-sm font-semibold transition-all duration-200 ${
                     view === 'day'
                       ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
                       : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
                   }`}
                   title="Dnevni prikaz"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span>Dan</span>
+                  Dan
                 </button>
               </div>
             </div>

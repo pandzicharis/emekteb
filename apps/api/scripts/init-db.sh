@@ -35,13 +35,21 @@ npx prisma generate
 echo "🗄️  Running database migrations..."
 npx prisma migrate deploy
 
-# Seed je isključen
-# echo "🌱 Seeding database..."
-# echo "  📝 Seeding korisnici, razredi i lekcije (KURAN i SUFARA)..."
-# if ! npm run prisma:seed; then
-#   echo "❌ Greška pri seed-u"
-#   exit 1
-# fi
+# Provjeri da li baza već ima seedane podatke (ADMIN i MUALLIM korisnike)
+echo "🔍 Provjera da li je baza već seedana..."
+ADMIN_COUNT=$(PGPASSWORD=postgres psql -h postgres -p 5432 -U postgres -d emekteb -t -c "SELECT COUNT(*) FROM \"Korisnik\" WHERE uloga = 'ADMIN'" | tr -d ' ')
+MUALLIM_COUNT=$(PGPASSWORD=postgres psql -h postgres -p 5432 -U postgres -d emekteb -t -c "SELECT COUNT(*) FROM \"Korisnik\" WHERE uloga = 'MUALLIM'" | tr -d ' ')
+
+if [ "$ADMIN_COUNT" -gt 0 ] && [ "$MUALLIM_COUNT" -gt 0 ]; then
+  echo "✅ Baza je već seedana (ADMIN i MUALLIM korisnici postoje). Preskačem seedanje."
+else
+  echo "🌱 Seeding database..."
+  echo "  📝 Seeding korisnici, razredi i lekcije (KURAN i SUFARA)..."
+  if ! npm run prisma:seed; then
+    echo "❌ Greška pri seed-u"
+    exit 1
+  fi
+fi
 
 echo "✅ Database initialization complete!"
 
