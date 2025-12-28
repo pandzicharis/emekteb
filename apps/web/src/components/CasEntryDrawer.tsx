@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { RasporedItem } from '../types/raspored';
 
-type TipCasa = 'LEKCIJA' | 'PROVJERA' | 'POSEBNO';
+type TipCasa = 'LEKCIJA' | 'PROVJERA' | 'POSEBNO' | 'PONAVLJANJE';
 type PrisustvoStatus = 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN';
 
 type Lesson = { id: string; naslov: string; tip?: 'ILMIHAL' | 'KURAN' | 'SUFARA' | null };
@@ -25,6 +25,7 @@ const tipoviCasa: { id: TipCasa; label: string; desc: string }[] = [
   { id: 'LEKCIJA', label: 'Lekcija', desc: 'Redovni tok' },
   { id: 'PROVJERA', label: 'Provjera znanja', desc: 'Test, kviz' },
   { id: 'POSEBNO', label: 'Posebna aktivnost', desc: 'Radionica, posjeta' },
+  { id: 'PONAVLJANJE', label: 'Ponavljanje', desc: 'Ponavljanje gradiva' },
 ];
 
 export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }: Props) {
@@ -672,6 +673,19 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
         </svg>
       );
     }
+    if (tip === 'PONAVLJANJE') {
+      // Repeat / refresh
+      return (
+        <svg className={`w-5 h-5 ${base}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+          />
+        </svg>
+      );
+    }
     // POSEBNO – sparkles
     return (
       <svg className={`w-5 h-5 ${base}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -884,7 +898,7 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                       </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     {tipoviCasa.map((opt) => {
                       const active = casFormData.tipoviCasa.includes(opt.id);
                       return (
@@ -893,11 +907,18 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                           onClick={() =>
                             setCasFormData((prev) => {
                               const already = prev.tipoviCasa.includes(opt.id);
+                              const newTipoviCasa = already
+                                ? prev.tipoviCasa.filter((t) => t !== opt.id)
+                                : [...prev.tipoviCasa, opt.id];
+                              
+                              // Ako je PONAVLJANJE odabrano, očisti lekcije
+                              const isPonavljanje = newTipoviCasa.includes('PONAVLJANJE');
+                              
                               return {
                                 ...prev,
-                                tipoviCasa: already
-                                  ? prev.tipoviCasa.filter((t) => t !== opt.id)
-                                  : [...prev.tipoviCasa, opt.id],
+                                tipoviCasa: newTipoviCasa,
+                                // Ako je PONAVLJANJE odabrano, očisti lekcije
+                                lekcije: isPonavljanje ? [] : prev.lekcije,
                               };
                             })
                           }
@@ -922,7 +943,8 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                   </div>
                 </div>
 
-                {/* Lekcije – multiselect lista sa checkboxima i tip badgevima (bez chipova) */}
+                {/* Lekcije – multiselect lista sa checkboxima i tip badgevima (bez chipova) - sakrij ako je PONAVLJANJE odabrano */}
+                {!casFormData.tipoviCasa.includes('PONAVLJANJE') && (
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
@@ -1135,6 +1157,7 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                     Lekcije mogu ostati prazne ako je fokus samo na provjeri znanja ili prisustvu.
                   </p>
                 </div>
+                )}
 
                 {/* Prisustvo – fokus na biranje prisutnih, sa lijepim status bedževima */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
@@ -1304,7 +1327,8 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                   </div>
                 </div>
 
-                {/* Ocjene */}
+                {/* Ocjene - sakrij ako je PONAVLJANJE odabrano */}
+                {!casFormData.tipoviCasa.includes('PONAVLJANJE') && (
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
@@ -2046,6 +2070,7 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* Napomena */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
@@ -2112,11 +2137,13 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                           {casFormData.tipoviCasa.length > 0 ? casFormData.tipoviCasa.join(', ') : 'nije odabrano'}
                         </span>
                       </li>
+                      {!casFormData.tipoviCasa.includes('PONAVLJANJE') && (
                       <li className="flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
                         <span className="font-medium">Lekcije odabrane:</span>
                         <span className="ml-0.5 font-semibold text-slate-900">{casFormData.lekcije.length}</span>
                       </li>
+                      )}
                       <li className="flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                         <span className="font-medium">Prisustvo uneseno za:</span>
@@ -2125,6 +2152,7 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                         </span>
                         <span className="ml-0.5 text-slate-500">učenika</span>
                       </li>
+                      {!casFormData.tipoviCasa.includes('PONAVLJANJE') && (
                       <li className="flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
                         <span className="font-medium">Ocjene unesene:</span>
@@ -2133,6 +2161,7 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
                         </span>
                         <span className="ml-0.5 text-slate-500">zapisa</span>
                       </li>
+                      )}
                     </ul>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end min-w-[220px]">

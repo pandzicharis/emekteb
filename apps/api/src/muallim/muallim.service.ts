@@ -750,6 +750,7 @@ export class MuallimService {
 
     // Pripremi timeline podatke - filtriraj po danu za prikaz kalendara
     // STRICT: koristi samo filteredRasporedi
+    // Ako je odabran datum, koristi danZaRaspored (koji je postavljen na osnovu selectedDay ili derivedDay)
     const raspored = filteredRasporedi
       .filter((r) => r.dan === danZaRaspored)
       .map(mapRaspored);

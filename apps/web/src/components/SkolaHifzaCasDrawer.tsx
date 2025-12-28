@@ -71,6 +71,7 @@ export default function SkolaHifzaCasDrawer({ open, slot, slotDate, onClose, onS
                   id: u.id,
                   ime: u.ime || '',
                   prezime: u.prezime || '',
+                  fotografija: u.fotografija || u.korisnik?.fotografija || null,
                   godinaRodjenja: u.godinaRodjenja ?? null,
                 });
               }

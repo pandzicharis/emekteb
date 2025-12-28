@@ -453,6 +453,7 @@ enum TipCasa {
     LEKCIJA
     PROVJERA
     POSEBNO
+    PONAVLJANJE
 }
 
 enum StatusPrisustva {

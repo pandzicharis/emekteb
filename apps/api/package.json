@@ -16,6 +16,7 @@
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:seed:demo": "ts-node prisma/seed-demo.ts",
     "prisma:seed:csv": "ts-node prisma/seed-from-csv.ts",
     "prisma:seed:csv:auto": "ts-node prisma/seed-from-csv-auto.ts",
     "prisma:truncate": "ts-node prisma/truncate.ts",

@@ -77,17 +77,19 @@ async function main() {
     await prisma.lekcija.deleteMany({});
     console.log('✅ Obrisane lekcije');
 
+    // SlobodanDan mora biti obrisan prije NastavnaGodina
+    await prisma.slobodanDan.deleteMany({});
+    console.log('✅ Obrisani slobodni dani');
+
+    // NastavnaGodina mora biti obrisana prije NastavniPlan
+    await prisma.nastavnaGodina.deleteMany({});
+    console.log('✅ Obrisane nastavne godine');
+
     await prisma.nastavniPlan.deleteMany({});
     console.log('✅ Obrisani nastavni planovi');
 
     await prisma.razred.deleteMany({});
     console.log('✅ Obrisani razredi');
-
-    await prisma.slobodanDan.deleteMany({});
-    console.log('✅ Obrisani slobodni dani');
-
-    await prisma.nastavnaGodina.deleteMany({});
-    console.log('✅ Obrisane nastavne godine');
 
     await prisma.import.deleteMany({});
     console.log('✅ Obrisani import zapisi');

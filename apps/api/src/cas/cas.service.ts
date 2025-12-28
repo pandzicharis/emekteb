@@ -4,7 +4,7 @@ import { StatusPrisustva, TipCasa } from '@prisma/client';
 import { SlobodanDanService } from '../slobodan-dan/slobodan-dan.service';
 
 export type PrisustvoStatus = 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN';
-export type TipCasaInput = 'LEKCIJA' | 'PROVJERA' | 'POSEBNO';
+export type TipCasaInput = 'LEKCIJA' | 'PROVJERA' | 'POSEBNO' | 'PONAVLJANJE';
 
 export interface CreateCasPayload {
   slotId: string;

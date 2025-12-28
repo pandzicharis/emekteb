@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "TipCasa" ADD VALUE 'PONAVLJANJE';

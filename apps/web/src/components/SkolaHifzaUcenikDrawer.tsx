@@ -35,6 +35,11 @@ interface Props {
   onSave?: () => Promise<void> | void;
 }
 
+// Helper function to format sura name for display
+const formatSuraName = (name: string): string => {
+  return name.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+};
+
 export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId, onClose, onSave }: Props) {
   const [lekcije, setLekcije] = useState<Lekcija[]>([]);
   const [ucenikNapredak, setUcenikNapredak] = useState<SkolaHifzaUcenik | null>(null);
@@ -43,22 +48,28 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
   const [selectedSura, setSelectedSura] = useState<string>('');
   const [selectedAjeta, setSelectedAjeta] = useState<Set<number>>(new Set());
   const [skolaHifzaId, setSkolaHifzaId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const napredakFormRef = useRef<HTMLDivElement | null>(null);
 
   // Učitaj lekcije (sure)
   useEffect(() => {
     const fetchLekcije = async () => {
       try {
+        setError(null);
         const response = await axios.get<Lekcija[]>(`${API_URL}/lekcije`, {
           params: { tip: 'SKOLA_HIFZA' },
         });
         setLekcije(response.data.sort((a, b) => a.naslov.localeCompare(b.naslov)));
       } catch (err) {
         console.warn('Error fetching lekcije:', err);
+        setError('Greška pri učitavanju lekcija');
       }
     };
-    fetchLekcije();
-  }, []);
+    if (open) {
+      fetchLekcije();
+    }
+  }, [open]);
 
   // Učitaj SkolaHifza ID i napredak učenika
   useEffect(() => {
@@ -117,6 +128,8 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
       setSelectedSura('');
       setSelectedAjeta(new Set());
       setUcenikNapredak(null);
+      setError(null);
+      setSuccessMessage(null);
     }
   }, [open]);
 
@@ -159,6 +172,8 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
     if (!ucenik || !selectedSura || selectedAjeta.size === 0 || !skolaHifzaId) return;
 
     setSaving(true);
+    setError(null);
+    setSuccessMessage(null);
     try {
       // Ažuriraj napredak - zamijeni postojeće ajeta sa novim odabranim
       const currentNapredak = ucenikNapredak?.napredak || {};
@@ -183,12 +198,18 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
       // Ne resetuj selectedSura - korisnik može nastaviti sa istom surom
       setSelectedAjeta(new Set(updatedAjeta));
       
+      setSuccessMessage(`Napredak za suru "${formatSuraName(selectedSura)}" je uspješno sačuvan!`);
+      
+      // Auto-hide success message after 3 seconds
+      setTimeout(() => setSuccessMessage(null), 3000);
+      
       if (onSave) {
         await onSave();
       }
     } catch (err: any) {
       console.error('Error saving napredak:', err);
-      alert('Greška pri čuvanju napretka: ' + (err.response?.data?.message || err.message));
+      const errorMsg = err.response?.data?.message || err.message || 'Nepoznata greška';
+      setError(`Greška pri čuvanju napretka: ${errorMsg}`);
     } finally {
       setSaving(false);
     }
@@ -196,9 +217,11 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
 
   const handleDeleteSura = async (suraName: string) => {
     if (!ucenik || !skolaHifzaId) return;
-    if (!confirm(`Da li ste sigurni da želite obrisati sve ajeta iz sure "${suraName}"?`)) return;
+    if (!confirm(`Da li ste sigurni da želite obrisati sve ajeta iz sure "${formatSuraName(suraName)}"?`)) return;
 
     setSaving(true);
+    setError(null);
+    setSuccessMessage(null);
     try {
       const currentNapredak = ucenikNapredak?.napredak || {};
       const updatedNapredak = { ...currentNapredak };
@@ -214,12 +237,22 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
         napredak: updatedNapredak,
       });
 
+      // Ako je obrisana sura trenutno selektovana, resetuj formu
+      if (selectedSura === suraName) {
+        setSelectedSura('');
+        setSelectedAjeta(new Set());
+      }
+
+      setSuccessMessage(`Sura "${formatSuraName(suraName)}" je uspješno obrisana.`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+
       if (onSave) {
         await onSave();
       }
     } catch (err: any) {
       console.error('Error deleting sura:', err);
-      alert('Greška pri brisanju: ' + (err.response?.data?.message || err.message));
+      const errorMsg = err.response?.data?.message || err.message || 'Nepoznata greška';
+      setError(`Greška pri brisanju: ${errorMsg}`);
     } finally {
       setSaving(false);
     }
@@ -233,33 +266,33 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 z-50 transition-opacity"
+        className="fixed inset-0 bg-black/50 z-[60] transition-opacity"
         onClick={onClose}
       />
 
       {/* Drawer */}
       <div
-        className={`fixed right-0 top-0 bottom-0 w-full max-w-2xl bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${
+        className={`fixed right-0 top-0 bottom-0 w-full max-w-2xl bg-white shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out ${
           open ? 'translate-x-0' : 'translate-x-full'
         } flex flex-col`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="sticky top-0 bg-gradient-to-r from-purple-600 to-indigo-600 text-white border-b border-purple-500 px-6 py-4 flex items-center justify-between z-10 shadow-lg">
-          <div className="flex items-center gap-4">
+        <div className="sticky top-0 bg-purple-600 text-white border-b border-purple-500 px-6 py-4 flex items-center justify-between z-10">
+          <div className="flex items-center gap-4 flex-1 min-w-0">
             {ucenik.fotografija ? (
               <img
                 src={`${API_URL}/${ucenik.fotografija}`}
                 alt={`${ucenik.ime} ${ucenik.prezime}`}
-                className="w-12 h-12 rounded-full object-cover border-2 border-white/50"
+                className="w-12 h-12 rounded-full object-cover border-2 border-white/50 flex-shrink-0"
               />
             ) : (
-              <div className="w-12 h-12 rounded-full bg-white/20 text-white flex items-center justify-center font-semibold text-lg border-2 border-white/50">
+              <div className="w-12 h-12 rounded-full bg-white/20 text-white flex items-center justify-center font-semibold text-lg border-2 border-white/50 flex-shrink-0">
                 {ucenik.ime.charAt(0)}{ucenik.prezime.charAt(0)}
               </div>
             )}
-            <div>
-              <h2 className="text-xl font-bold">
+            <div className="flex-1 min-w-0">
+              <h2 className="text-xl font-bold truncate">
                 {ucenik.ime} {ucenik.prezime}
               </h2>
               <p className="text-sm text-purple-100 mt-0.5">Praćenje napretka u učenju</p>
@@ -281,10 +314,45 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gradient-to-b from-gray-50 to-white">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50">
+          {/* Success/Error Messages */}
+          {successMessage && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-2">
+              <svg className="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-sm text-emerald-800 flex-1">{successMessage}</p>
+              <button
+                onClick={() => setSuccessMessage(null)}
+                className="text-emerald-600 hover:text-emerald-800"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2">
+              <svg className="w-4 h-4 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-sm text-red-800 flex-1">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                className="text-red-600 hover:text-red-800"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+
           {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-8 w-8 border-4 border-purple-200 border-t-purple-600"></div>
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-200 border-t-purple-600 mb-4"></div>
+              <p className="text-sm font-medium text-gray-600">Učitavanje podataka...</p>
             </div>
           ) : (
             <>
@@ -315,15 +383,18 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
               {/* Pregled napretka */}
               {napredak && Object.keys(napredak).length > 0 ? (
                 <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                      <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="flex items-center justify-between mb-5">
+                    <h4 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                       Naučene sure i ajeta
                     </h4>
+                    <span className="text-sm font-semibold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                      {Object.keys(napredak).length} {Object.keys(napredak).length === 1 ? 'sura' : 'sura'}
+                    </span>
                   </div>
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {Object.entries(napredak).map(([sura, ajeta]) => {
                       const lekcija = lekcije.find((l) => l.naslov === sura);
                       const maxAjeta = lekcija?.brojAjeta || 0;
@@ -336,7 +407,7 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
                           <div className="flex items-start justify-between mb-3">
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-2">
-                                <span className="font-bold text-gray-900 text-base">{sura}</span>
+                                <span className="font-bold text-gray-900 text-base">{formatSuraName(sura)}</span>
                                 {isComplete && (
                                   <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">
                                     Završeno
@@ -371,7 +442,6 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
                               onClick={() => {
                                 setSelectedSura(sura);
                                 setSelectedAjeta(new Set(sortedAjeta));
-                                // Skroluj do forme nakon kratke pauze da se state ažurira
                                 setTimeout(() => {
                                   napredakFormRef.current?.scrollIntoView({ 
                                     behavior: 'smooth', 
@@ -441,18 +511,18 @@ export default function SkolaHifzaUcenikDrawer({ open, ucenik, nastavnaGodinaId,
                       }}
                       className="w-full rounded-xl border-2 border-gray-200 bg-white text-sm px-4 py-3 focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all font-medium"
                     >
-                      <option value="">-- Odaberi suru --</option>
-                      {lekcije.map((lekcija) => {
-                        const existingCount = napredak?.[lekcija.naslov]?.length || 0;
-                        const isComplete = lekcija.brojAjeta && existingCount === lekcija.brojAjeta;
-                        return (
-                          <option key={lekcija.id} value={lekcija.naslov}>
-                            {lekcija.naslov} ({lekcija.brojAjeta} ajeta) {existingCount > 0 ? `- ${existingCount} naučeno${isComplete ? ' ✓' : ''}` : ''}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
+                        <option value="">-- Odaberi suru --</option>
+                        {lekcije.map((lekcija) => {
+                          const existingCount = napredak?.[lekcija.naslov]?.length || 0;
+                          const isComplete = lekcija.brojAjeta && existingCount === lekcija.brojAjeta;
+                          return (
+                            <option key={lekcija.id} value={lekcija.naslov}>
+                              {formatSuraName(lekcija.naslov)} ({lekcija.brojAjeta} ajeta) {existingCount > 0 ? `- ${existingCount} naučeno${isComplete ? ' ✓' : ''}` : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
 
                   {selectedSura && (() => {
                     const lekcija = lekcije.find((l) => l.naslov === selectedSura);

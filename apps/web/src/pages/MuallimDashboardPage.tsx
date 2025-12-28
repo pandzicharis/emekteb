@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import CasEntryDrawer from '../components/CasEntryDrawer';
 import SkolaHifzaCasDrawer from '../components/SkolaHifzaCasDrawer';
-import WeekendDatePicker from '../components/WeekendDatePicker';
+import CasoviDateFilter from '../components/CasoviDateFilter';
 import { RasporedItem } from '../types/raspored';
 
 const API_URL = import.meta.env['VITE_API_URL'] || 'http://localhost:3000';
@@ -224,14 +224,14 @@ export default function MuallimDashboardPage() {
       setError(null);
       const params: { dan?: string; datum?: string } = {};
       
-      // Ako je odabran konkretan datum, šalji datum i dan
+      // Ako je odabran konkretan datum (subota vikenda), šalji datum (API će vratiti oba dana vikenda)
+      // Ali također šalji selectedDay da API zna koji dan prikazati u raspored array-u
       if (selectedWeekendDate) {
         const dateStr = selectedWeekendDate.toISOString().split('T')[0]; // YYYY-MM-DD format
         params.datum = dateStr;
-        // Uvijek šalji dan na osnovu odabranog datuma
-        const dayOfWeek = selectedWeekendDate.getDay();
-        params.dan = dayOfWeek === 6 ? 'subota' : dayOfWeek === 0 ? 'nedjelja' : (selectedDay || 'subota');
-        console.log('📡 [fetchDashboardData] Using selectedWeekendDate:', { dateStr, dayOfWeek, dan: params.dan });
+        // Također šalji dan da API zna koji dan prikazati u raspored array-u
+        params.dan = selectedDay || 'subota';
+        console.log('📡 [fetchDashboardData] Using selectedWeekendDate (vikend filter):', { dateStr, dan: params.dan });
       } else if (selectedDay) {
         // Inače, šalji samo dan
         params.dan = selectedDay;
@@ -1410,26 +1410,22 @@ export default function MuallimDashboardPage() {
               </div>
             )}
 
-            {/* Weekend Date Picker - pretraga po vikendima */}
+            {/* Weekend Date Filter - pretraga po vikendima (sedmicama) */}
             {nastavnaGodina && (
               <div className="mb-4 w-full">
-                <WeekendDatePicker
+                <CasoviDateFilter
+                  view="week"
                   selectedDate={selectedWeekendDate}
                   onDateSelect={(date) => {
-                    console.log('WeekendDatePicker onDateSelect:', date);
+                    console.log('CasoviDateFilter onDateSelect:', date);
                     if (date) {
-                      const dayOfWeek = date.getDay();
-                      console.log('Day of week:', dayOfWeek);
-                      const day = dayOfWeek === 6 ? 'subota' : dayOfWeek === 0 ? 'nedjelja' : null;
-                      if (day) {
-                        console.log('Setting selectedDay to', day);
-                        setSelectedDay(day);
-                        setSelectedWeekendDate(date);
-                      }
+                      // Datum je subota vikenda - postavi ga i defaultno prikaži subotu
+                      setSelectedWeekendDate(date);
+                      setSelectedDay('subota'); // Defaultno prikaži subotu
                     } else {
-                      console.log('Date is null, resetting selectedDay');
-                      setSelectedDay(null);
+                      console.log('Date is null, resetting');
                       setSelectedWeekendDate(null);
+                      setSelectedDay('subota'); // Defaultno postavi subotu
                     }
                   }}
                   onResetToToday={() => {
@@ -1454,7 +1450,6 @@ export default function MuallimDashboardPage() {
                   }}
                   startDate={new Date(nastavnaGodina.datumOd)}
                   endDate={new Date(nastavnaGodina.datumDo)}
-                  casoviCounts={casoviCounts}
                 />
               </div>
             )}
@@ -1482,7 +1477,7 @@ export default function MuallimDashboardPage() {
               </div>
             </div>
 
-            {/* Calendar View - Same style as SetupNastavnaGodinaPage but single day */}
+            {/* Calendar View - Vikend prikaz (oba dana zajedno) */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                 {/* Header with day labels */}
                 <div className="flex border-b border-gray-200 bg-white">
@@ -1492,7 +1487,7 @@ export default function MuallimDashboardPage() {
                     </svg>
                   </div>
                   {(() => {
-                    // Uvijek prikaži oba dana sa indikatorima
+                    // Uvijek prikaži oba dana vikenda
                     const subotaSlots = collectDaySlots('subota');
                     const nedjeljaSlots = collectDaySlots('nedjelja');
                     
@@ -1724,8 +1719,8 @@ export default function MuallimDashboardPage() {
                       return null;
             })()}
 
-                    {/* Occupied slots - prikaz oba dana; klik dozvoljen samo za trenutni vikend dan */}
-                    {/* Ako je odabran datum u picker-u, prikaži samo slotove za odabrani dan, inače prikaži oba dana */}
+                    {/* Occupied slots - prikaz dana na osnovu selectedDay taba */}
+                    {/* Ako je odabran datum u picker-u, prikaži samo odabrani dan (subota ili nedjelja), inače prikaži oba dana */}
                     {(selectedWeekendDate 
                       ? [effectiveSelectedDay]
                       : WEEKEND_DAYS
