@@ -26,3 +26,4 @@ Dvokliknite na `demo-app-windows.bat` fajl
 
 Ova skripta će obrisati sve postojeće podatke u bazi prije kreiranja demo podataka!
 
+

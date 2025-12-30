@@ -2843,6 +2843,14 @@ export class ReportsService {
       let pdfDoc: PDFDocument;
       try {
         pdfDoc = await PDFDocument.load(templateBytes);
+        // Register fontkit for custom fonts (optional)
+        try {
+          const fontkit = require('@pdf-lib/fontkit');
+          pdfDoc.registerFontkit(fontkit);
+          console.log('✅ Fontkit registered successfully');
+        } catch (fontkitError) {
+          console.warn('⚠️ Fontkit not available, continuing without it. Install @pdf-lib/fontkit for better font support.');
+        }
         console.log('PDF document loaded successfully');
       } catch (loadError) {
         console.error('Error loading PDF document:', loadError);
@@ -2868,6 +2876,72 @@ export class ReportsService {
           .replace(/š/g, 's')
           .replace(/ž/g, 'z');
       };
+
+      // Load Bitter font
+      const possibleFontPaths = [
+        path.join(process.cwd(), '..', '..', 'fonts', 'Bitter', 'static', 'Bitter-Regular.ttf'),
+        path.join(process.cwd(), '..', 'fonts', 'Bitter', 'static', 'Bitter-Regular.ttf'),
+        path.join(process.cwd(), 'fonts', 'Bitter', 'static', 'Bitter-Regular.ttf'),
+        path.join(__dirname, '..', '..', '..', '..', 'fonts', 'Bitter', 'static', 'Bitter-Regular.ttf'),
+        path.join(__dirname, '..', '..', '..', '..', '..', 'fonts', 'Bitter', 'static', 'Bitter-Regular.ttf'),
+      ];
+
+      const possibleBoldFontPaths = [
+        path.join(process.cwd(), '..', '..', 'fonts', 'Bitter', 'static', 'Bitter-Bold.ttf'),
+        path.join(process.cwd(), '..', 'fonts', 'Bitter', 'static', 'Bitter-Bold.ttf'),
+        path.join(process.cwd(), 'fonts', 'Bitter', 'static', 'Bitter-Bold.ttf'),
+        path.join(__dirname, '..', '..', '..', '..', 'fonts', 'Bitter', 'static', 'Bitter-Bold.ttf'),
+        path.join(__dirname, '..', '..', '..', '..', '..', 'fonts', 'Bitter', 'static', 'Bitter-Bold.ttf'),
+      ];
+
+      let bitterFontPath: string | undefined;
+      let bitterBoldFontPath: string | undefined;
+
+      for (const fontPath of possibleFontPaths) {
+        const normalizedPath = path.resolve(fontPath);
+        if (fs.existsSync(normalizedPath)) {
+          bitterFontPath = normalizedPath;
+          console.log(`✅ Found Bitter Regular font at: ${bitterFontPath}`);
+          break;
+        }
+      }
+
+      for (const fontPath of possibleBoldFontPaths) {
+        const normalizedPath = path.resolve(fontPath);
+        if (fs.existsSync(normalizedPath)) {
+          bitterBoldFontPath = normalizedPath;
+          console.log(`✅ Found Bitter Bold font at: ${bitterBoldFontPath}`);
+          break;
+        }
+      }
+
+      if (!bitterFontPath || !bitterBoldFontPath) {
+        console.warn('Bitter font not found, falling back to StandardFonts');
+      }
+
+      // Embed Bitter fonts
+      let bitterFont;
+      let bitterBoldFont;
+      try {
+        if (bitterFontPath && bitterBoldFontPath) {
+          const bitterFontBytes = fs.readFileSync(bitterFontPath);
+          const bitterBoldFontBytes = fs.readFileSync(bitterBoldFontPath);
+          bitterFont = await pdfDoc.embedFont(bitterFontBytes);
+          bitterBoldFont = await pdfDoc.embedFont(bitterBoldFontBytes);
+          console.log('✅ Bitter fonts embedded successfully');
+        } else {
+          // Fallback to standard fonts if Bitter not found
+          bitterFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+          bitterBoldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+          console.warn('⚠️ Using StandardFonts as fallback');
+        }
+      } catch (fontError) {
+        console.error('Error embedding Bitter font:', fontError);
+        // Fallback to standard fonts
+        bitterFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        bitterBoldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        console.warn('⚠️ Using StandardFonts as fallback due to error');
+      }
 
       // Try to get form fields first
       try {
@@ -2944,6 +3018,44 @@ export class ReportsService {
             }
           }
 
+          // Update all field appearances with Bitter font after filling all fields
+          // First update all fields with regular font, then update name fields with bold
+          try {
+            // Update all fields with regular Bitter font
+            form.updateFieldAppearances(bitterFont);
+            console.log('✅ Updated all form field appearances with Bitter font');
+            
+            // Update name fields with bold font
+            for (const field of allFields) {
+              try {
+                const fieldName = field.getName();
+                if (fieldName.includes('ime') || fieldName.includes('name')) {
+                  const textField = form.getTextField(fieldName);
+                  textField.updateAppearances(bitterBoldFont);
+                  console.log(`✅ Updated ${fieldName} with Bitter Bold font`);
+                }
+              } catch (e) {
+                // Skip fields that can't be updated
+              }
+            }
+          } catch (updateError) {
+            console.warn('Could not update all field appearances, trying individual updates:', updateError);
+            // Try to update individual fields
+            for (const field of allFields) {
+              try {
+                const fieldName = field.getName();
+                const textField = form.getTextField(fieldName);
+                if (fieldName.includes('ime') || fieldName.includes('name')) {
+                  textField.updateAppearances(bitterBoldFont);
+                } else {
+                  textField.updateAppearances(bitterFont);
+                }
+              } catch (e) {
+                // Skip fields that can't be updated
+              }
+            }
+          }
+
           // Save PDF first
           console.log('Saving PDF with form fields...');
           let pdfBytes: Uint8Array;
@@ -2975,9 +3087,7 @@ export class ReportsService {
 
       // Fallback: Draw text on the PDF using coordinates
       // Note: replaceBosnianChars function is already defined above
-
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      // Note: Bitter fonts are already loaded above
 
       // Replace Bosnian characters for compatibility
       const imePrezimeSafe = replaceBosnianChars(diplomaData.imePrezime);
@@ -2986,7 +3096,7 @@ export class ReportsService {
 
       // Calculate text width for centering name
       const textSize = 14;
-      const textWidth = boldFont.widthOfTextAtSize(imePrezimeSafe, textSize);
+      const textWidth = bitterBoldFont.widthOfTextAtSize(imePrezimeSafe, textSize);
       const centeredX = (width - textWidth) / 2;
 
       // Draw text (coordinates need to be adjusted based on actual PDF)
@@ -2995,7 +3105,7 @@ export class ReportsService {
         x: centeredX,
         y: height - 200, // Adjust based on actual PDF
         size: textSize,
-        font: boldFont,
+        font: bitterBoldFont,
         color: rgb(0, 0, 0),
       });
 
@@ -3003,7 +3113,7 @@ export class ReportsService {
         x: width / 2 - 50, // Adjust based on actual PDF
         y: height - 250,
         size: 12,
-        font: font,
+        font: bitterFont,
         color: rgb(0, 0, 0),
       });
 
@@ -3019,7 +3129,7 @@ export class ReportsService {
         x: width / 2 - 50,
         y: height - 300,
         size: 12,
-        font: font,
+        font: bitterFont,
         color: rgb(0, 0, 0),
       });
 
@@ -3027,7 +3137,7 @@ export class ReportsService {
         x: width / 2 - 50,
         y: height - 350,
         size: 12,
-        font: font,
+        font: bitterFont,
         color: rgb(0, 0, 0),
       });
 

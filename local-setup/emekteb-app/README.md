@@ -24,3 +24,4 @@ Dvokliknite na `emekteb-app-windows.bat` fajl
 
 Ako seed već postoji, skripta će to detektovati i neće ga ponovno kreirati.
 
+

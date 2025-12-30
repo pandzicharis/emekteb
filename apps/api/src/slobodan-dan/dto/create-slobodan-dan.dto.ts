@@ -24,3 +24,4 @@ export class UpdateSlobodanDanDto {
   razlog?: string;
 }
 
+

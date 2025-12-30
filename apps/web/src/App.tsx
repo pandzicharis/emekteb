@@ -15,6 +15,7 @@ import SkolaHifzaPage from './pages/SkolaHifzaPage';
 import ReportsPage from './pages/ReportsPage';
 import YearConclusionPage from './pages/YearConclusionPage';
 import SlobodniDaniPage from './pages/SlobodniDaniPage';
+import DiplomaBuilderPage from './pages/DiplomaBuilderPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function AppContent() {
@@ -63,6 +64,7 @@ function AppContent() {
                 <Route path="/skola-hifza" element={<ProtectedRoute allowedRoles={['MUALLIM']}><SkolaHifzaPage /></ProtectedRoute>} />
                 <Route path="/izvjestaji" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
                 <Route path="/zakljucivanje-godine" element={<ProtectedRoute><YearConclusionPage /></ProtectedRoute>} />
+                <Route path="/diplome-builder" element={<ProtectedRoute allowedRoles={['MUALLIM']}><DiplomaBuilderPage /></ProtectedRoute>} />
                 <Route path="/slobodni-dani" element={<ProtectedRoute allowedRoles={['ADMIN']}><SlobodniDaniPage /></ProtectedRoute>} />
                 <Route path="/settings/muallimi" element={<ProtectedRoute allowedRoles={['ADMIN']}><MuallimiPage /></ProtectedRoute>} />
                 <Route path="/login" element={<Navigate to="/" replace />} />

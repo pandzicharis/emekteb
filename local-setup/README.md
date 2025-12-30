@@ -58,3 +58,4 @@ Ova skripta će:
 - Na Windows-u, `.bat` fajlovi se mogu pokrenuti dvoklikom
 - Demo app skripta će obrisati sve postojeće podatke!
 
+

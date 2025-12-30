@@ -15,12 +15,15 @@ COPY packages/shared-utils/package.json ./packages/shared-utils/
 RUN npm install
 
 # Ensure PDF libraries are installed in api workspace
-RUN cd apps/api && npm install pdf-lib jspdf jspdf-autotable
+RUN cd apps/api && npm install pdf-lib @pdf-lib/fontkit jspdf jspdf-autotable
 
 COPY . .
 
 # Copy PDF template to accessible location
 RUN mkdir -p /app/pdf && cp pdf/ILMIHAL.pdf /app/pdf/ILMIHAL.pdf 2>/dev/null || true
+
+# Copy fonts directory for PDF generation
+RUN mkdir -p /app/fonts && cp -r fonts/* /app/fonts/ 2>/dev/null || true
 
 # Generate Prisma Client
 RUN cd apps/api && npx prisma generate
