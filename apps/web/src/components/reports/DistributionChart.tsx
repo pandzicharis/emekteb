@@ -56,3 +56,4 @@ export default function DistributionChart({ data, type = 'pie', title, colors = 
 
 
 
+

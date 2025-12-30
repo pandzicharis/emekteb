@@ -59,3 +59,4 @@ Ova skripta će:
 - Demo app skripta će obrisati sve postojeće podatke!
 
 
+
