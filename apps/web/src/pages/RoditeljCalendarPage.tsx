@@ -256,11 +256,11 @@ export default function RoditeljCalendarPage() {
   const filteredSlots = useMemo(() => {
     let filtered = casSlots;
 
-    // Filter by selected child
+    // Filter by selected child - check slotId which contains ucenikId
     if (selectedUcenikId) {
       filtered = filtered.filter((slot) => {
-        return slot.prisustvo?.some((p) => p.ucenikId === selectedUcenikId) ||
-               slot.ocjene?.some((o) => o.ucenikId === selectedUcenikId);
+        // slotId format: `${ucenik.id}-${raspored.id}-${dateStr}`
+        return slot.slotId.startsWith(`${selectedUcenikId}-`);
       });
     }
 
