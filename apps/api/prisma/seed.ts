@@ -331,6 +331,127 @@ async function main() {
 
   console.log(`\n✅ Kreirano ${kreiraniUcenici.length} učenika\n`);
 
+  // ============================================
+  // 7. KREIRANJE RODITELJA I POVEZIVANJE SA UČENICIMA
+  // ============================================
+  console.log('👨‍👩‍👧‍👦 Kreiranje roditelja i povezivanje sa učenikom...');
+
+  // Kreiraj roditelja koji se loguje sa email-om prvog učenika (ahmed.hasanovic@emekteb.ba)
+  const prviUcenik = kreiraniUcenici[0];
+  const prviUcenikKorisnik = await prisma.korisnik.findUnique({
+    where: { id: prviUcenik.korisnikId! },
+  });
+
+  if (prviUcenikKorisnik && prviUcenikKorisnik.email) {
+    // Koristimo email u formatu roditelj.ime.prezime@emekteb.ba zbog unique constraint
+    const roditeljEmail = `roditelj.${prviUcenikKorisnik.email}`;
+    
+    // Provjeri da li već postoji roditelj sa tim email-om
+    const existingRoditelj = await prisma.korisnik.findFirst({
+      where: {
+        email: roditeljEmail,
+        uloga: Uloga.RODITELJ,
+      },
+    });
+
+    let roditeljKorisnik;
+    if (existingRoditelj) {
+      console.log(`  ⚠️  Roditelj korisnik već postoji sa email-om: ${existingRoditelj.email}`);
+      roditeljKorisnik = existingRoditelj;
+    } else {
+      // Kreiraj roditelj korisnika sa email-om u formatu roditelj.ime.prezime@emekteb.ba
+      roditeljKorisnik = await prisma.korisnik.create({
+        data: {
+          email: roditeljEmail,
+          lozinka: hashedPassword,
+          ime: 'Roditelj',
+          prezime: prviUcenikKorisnik.prezime || 'Test',
+          uloga: Uloga.RODITELJ,
+          aktivan: true,
+        },
+      });
+
+      console.log(`  ✅ Kreiran roditelj korisnik: ${roditeljEmail}`);
+      console.log(`  📧 Roditelj se loguje sa email-om djeteta: ${prviUcenikKorisnik.email}`);
+    }
+
+    // Provjeri da li već postoje Roditelj zapisi za prvog učenika
+    const existingRoditeljZapisi = await prisma.roditelj.findMany({
+      where: {
+        ucenikId: prviUcenik.id,
+      },
+    });
+
+    // Kreiraj ili ažuriraj Roditelj zapise za prvog učenika
+    // Koristimo isti email kao u Korisnik tabeli (roditelj.ahmed.hasanovic@emekteb.ba)
+    const roditeljEmailForRoditeljTable = roditeljEmail; // Isti email kao u Korisnik tabeli
+    
+    // Provjeri da li postoji majka
+    const existingMajka = await prisma.roditelj.findFirst({
+      where: {
+        ucenikId: prviUcenik.id,
+        tip: 'MAJKA',
+      },
+    });
+
+    if (existingMajka) {
+      await prisma.roditelj.update({
+        where: { id: existingMajka.id },
+        data: {
+          imePrezime: 'Majka Test',
+          email: roditeljEmailForRoditeljTable,
+          mobitel: '+38761123456',
+        },
+      });
+    } else {
+      await prisma.roditelj.create({
+        data: {
+          ucenikId: prviUcenik.id,
+          tip: 'MAJKA',
+          imePrezime: 'Majka Test',
+          email: roditeljEmailForRoditeljTable,
+          mobitel: '+38761123456',
+        },
+      });
+    }
+
+    // Provjeri da li postoji otac
+    const existingOtac = await prisma.roditelj.findFirst({
+      where: {
+        ucenikId: prviUcenik.id,
+        tip: 'OTAC',
+      },
+    });
+
+    if (existingOtac) {
+      await prisma.roditelj.update({
+        where: { id: existingOtac.id },
+        data: {
+          imePrezime: 'Otac Test',
+          email: roditeljEmailForRoditeljTable,
+          mobitel: '+38762123456',
+        },
+      });
+    } else {
+      await prisma.roditelj.create({
+        data: {
+          ucenikId: prviUcenik.id,
+          tip: 'OTAC',
+          imePrezime: 'Otac Test',
+          email: roditeljEmailForRoditeljTable,
+          mobitel: '+38762123456',
+        },
+      });
+    }
+
+    console.log(`  ✅ Kreirani/ažurirani Roditelj zapisi za učenika: ${prviUcenikKorisnik.ime} ${prviUcenikKorisnik.prezime}`);
+
+    console.log(`  📧 Email roditelja u Roditelj tabeli: ${roditeljEmail}`);
+    console.log(`  📧 Za login koristi email djeteta: ${prviUcenikKorisnik.email}`);
+  }
+
+  console.log('\n✅ Roditelj kreiran i povezan\n');
+
   console.log('\n🎉 Seeding završen!');
   // Pronađi lekcije za Školu Hifza za statistiku
   const skolaHifzaLekcije = await prisma.lekcija.findMany({
@@ -349,6 +470,8 @@ async function main() {
   console.log('   Admin: admin@emekteb.ba / password123 / PIN: 0000');
   console.log('   Muallim: muallim@emekteb.ba / password123 / PIN: 1234');
   console.log('   Učenici: ime.prezime@emekteb.ba / password123 / PIN: 2000-2009');
+  console.log('   Roditelj: ahmed.hasanovic@emekteb.ba / password123');
+  console.log('   (Roditelj se loguje sa email-om djeteta, ali u bazi ima email: roditelj.ahmed.hasanovic@emekteb.ba)');
 }
 
 main()

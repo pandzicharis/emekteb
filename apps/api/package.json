@@ -21,6 +21,7 @@
     "prisma:seed:csv:auto": "ts-node prisma/seed-from-csv-auto.ts",
     "prisma:truncate": "ts-node prisma/truncate.ts",
     "prisma:remove-kuran-sufara": "ts-node prisma/remove-kuran-sufara-connections.ts",
+    "create-test-parent": "ts-node scripts/create-test-parent.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",

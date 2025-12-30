@@ -4,7 +4,7 @@ import axios from 'axios';
 interface User {
   id: string;
   email: string;
-  uloga: 'ADMIN' | 'MUALLIM' | 'UCENIK';
+  uloga: 'ADMIN' | 'MUALLIM' | 'UCENIK' | 'RODITELJ';
   ime: string | null;
   prezime: string | null;
   fotografija: string | null;

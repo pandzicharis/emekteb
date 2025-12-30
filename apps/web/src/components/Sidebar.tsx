@@ -27,6 +27,11 @@ const getMenuItems = (uloga: string, hasSkolaHifza: boolean = false): MenuEntry[
     },
   ];
 
+  // Za RODITELJ, dodajemo samo Dashboard
+  if (uloga === 'RODITELJ') {
+    return baseItems;
+  }
+
   // Za MUALLIM, dodajemo grupu Nastava
   if (uloga === 'MUALLIM') {
     const nastavaItems = [

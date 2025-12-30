@@ -1,6 +1,7 @@
 import { useAuth } from '../contexts/AuthContext';
 import AdminDashboardPage from './AdminDashboardPage';
 import MuallimDashboardPage from './MuallimDashboardPage';
+import RoditeljDashboardPage from './RoditeljDashboardPage';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -11,6 +12,10 @@ export default function DashboardPage() {
 
   if (user?.uloga === 'MUALLIM') {
     return <MuallimDashboardPage />;
+  }
+
+  if (user?.uloga === 'RODITELJ') {
+    return <RoditeljDashboardPage />;
   }
 
   return (
@@ -131,28 +136,7 @@ export default function DashboardPage() {
             Brze Akcije
           </h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Link
-              to="/import"
-              className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
-            >
-              <svg
-                className="h-8 w-8 text-blue-600 mr-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                />
-              </svg>
-              <div>
-                <p className="font-medium text-gray-900">Import Učenika</p>
-                <p className="text-sm text-gray-600">Uvezi CSV fajl sa učenikom</p>
-              </div>
-            </Link>
+            {/* Placeholder for future actions */}
           </div>
         </div>
       </div>

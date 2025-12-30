@@ -15,11 +15,36 @@ export class AuthService {
   ) {}
 
   async login(loginDto: LoginDto) {
-    const user = await this.prisma.korisnik.findUnique({
-      where: { email: loginDto.email },
-    });
+    this.logger.debug(`🔐 Login attempt for email: ${loginDto.email}`);
+
+    let user: any = null;
+
+    // Ako email nije u formatu roditelj.*, prvo provjeri da li postoji roditelj sa prefiksom
+    // (roditelj se loguje sa email-om djeteta, ali u bazi ima email roditelj.email@emekteb.ba)
+    if (loginDto.email.includes('@emekteb.ba') && !loginDto.email.startsWith('roditelj.')) {
+      const roditeljEmail = `roditelj.${loginDto.email}`;
+      this.logger.debug(`🔍 First checking for parent with email: ${roditeljEmail}`);
+      user = await this.prisma.korisnik.findUnique({
+        where: { email: roditeljEmail },
+      });
+      if (user && user.uloga === 'RODITELJ') {
+        this.logger.debug(`✅ Found parent: ${user.id}`);
+      } else {
+        this.logger.debug(`👤 Parent not found with email: ${roditeljEmail}`);
+        user = null;
+      }
+    }
+
+    // Ako roditelj nije pronađen, provjeri da li postoji korisnik sa tačnim email-om
+    if (!user) {
+      user = await this.prisma.korisnik.findUnique({
+        where: { email: loginDto.email },
+      });
+      this.logger.debug(`👤 User found with exact email: ${user ? `${user.uloga} - ${user.id}` : 'NOT FOUND'}`);
+    }
 
     if (!user) {
+      this.logger.warn(`❌ User not found for email: ${loginDto.email}`);
       throw new UnauthorizedException('Neispravni podaci za prijavu');
     }
 
@@ -27,11 +52,15 @@ export class AuthService {
       throw new UnauthorizedException('Korisnički nalog nije aktivan');
     }
 
+    this.logger.debug(`🔑 Checking password for user: ${user.id} (${user.uloga})`);
     const isPasswordValid = await compare(loginDto.lozinka, user.lozinka);
 
     if (!isPasswordValid) {
+      this.logger.warn(`❌ Invalid password for user: ${user.id}`);
       throw new UnauthorizedException('Neispravni podaci za prijavu');
     }
+
+    this.logger.debug(`✅ Password valid for user: ${user.id}`);
 
     // Ažuriraj vreme poslednjeg logiranja
     await this.prisma.korisnik.update({

@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "Uloga" ADD VALUE 'RODITELJ';
