@@ -15,9 +15,10 @@ import { SkolaHifzaModule } from './skola-hifza/skola-hifza.module';
 import { ReportsModule } from './reports/reports.module';
 import { SlobodanDanModule } from './slobodan-dan/slobodan-dan.module';
 import { DiplomaModule } from './diploma/diploma.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
-  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule, CasModule, UcenikModule, SkolaHifzaModule, ReportsModule, SlobodanDanModule, DiplomaModule],
+  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule, CasModule, UcenikModule, SkolaHifzaModule, ReportsModule, SlobodanDanModule, DiplomaModule, AdminModule],
   controllers: [AppController],
   providers: [AppService],
 })

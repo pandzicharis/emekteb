@@ -884,7 +884,8 @@ export default function SetupNastavnaGodinaPage() {
     };
 
     const pushSlot = (razred: number, grupa: string, schedule?: Schedule) => {
-      if (!schedule?.slot) return;
+      if (!schedule?.slot || !schedule?.day || !schedule?.location) return;
+      if (!empty[schedule.day] || !empty[schedule.day][schedule.location]) return;
       empty[schedule.day][schedule.location].push({
         razred,
         grupa,

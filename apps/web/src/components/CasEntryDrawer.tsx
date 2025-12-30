@@ -152,7 +152,20 @@ export default function CasEntryDrawer({ open, slot, slotDate, onClose, onSave }
             lessonsById.set(l.id, l);
           }
         });
-        const fetchedLessons = Array.from(lessonsById.values());
+        let fetchedLessons = Array.from(lessonsById.values());
+        
+        // Ako nema lekcija, dodaj mock lekcije za testiranje/mockup
+        if (fetchedLessons.length === 0) {
+          console.log('⚠️ Nema lekcija za razred, dodajem mock lekcije za mockup');
+          fetchedLessons = [
+            { id: 'mock-ilmihal-1', naslov: 'Ilmihal lekcija 1', tip: 'ILMIHAL' },
+            { id: 'mock-ilmihal-2', naslov: 'Ilmihal lekcija 2', tip: 'ILMIHAL' },
+            { id: 'mock-kuran-1', naslov: 'Kuran lekcija 1', tip: 'KURAN' },
+            { id: 'mock-kuran-2', naslov: 'Kuran lekcija 2', tip: 'KURAN' },
+            { id: 'mock-sufara-1', naslov: 'Sufara lekcija 1', tip: 'SUFARA' },
+            { id: 'mock-sufara-2', naslov: 'Sufara lekcija 2', tip: 'SUFARA' },
+          ];
+        }
         
         // Dohvati učenike - kombinuj iz različitih izvora
         const studentsMap = new Map<string, Student>();
