@@ -343,8 +343,9 @@ async function main() {
   });
 
   if (prviUcenikKorisnik && prviUcenikKorisnik.email) {
-    // Koristimo email u formatu roditelj.ime.prezime@emekteb.ba zbog unique constraint
-    const roditeljEmail = `roditelj.${prviUcenikKorisnik.email}`;
+    // Koristimo email u formatu r.ime.prezime@emekteb.ba
+    const emailParts = prviUcenikKorisnik.email.split('@');
+    const roditeljEmail = emailParts.length === 2 ? `r.${emailParts[0]}@${emailParts[1]}` : `r.${prviUcenikKorisnik.email}`;
     
     // Provjeri da li već postoji roditelj sa tim email-om
     const existingRoditelj = await prisma.korisnik.findFirst({
@@ -359,7 +360,7 @@ async function main() {
       console.log(`  ⚠️  Roditelj korisnik već postoji sa email-om: ${existingRoditelj.email}`);
       roditeljKorisnik = existingRoditelj;
     } else {
-      // Kreiraj roditelj korisnika sa email-om u formatu roditelj.ime.prezime@emekteb.ba
+      // Kreiraj roditelj korisnika sa email-om u formatu r.ime.prezime@emekteb.ba
       roditeljKorisnik = await prisma.korisnik.create({
         data: {
           email: roditeljEmail,
@@ -383,7 +384,7 @@ async function main() {
     });
 
     // Kreiraj ili ažuriraj Roditelj zapise za prvog učenika
-    // Koristimo isti email kao u Korisnik tabeli (roditelj.ahmed.hasanovic@emekteb.ba)
+    // Koristimo isti email kao u Korisnik tabeli (r.ahmed.hasanovic@emekteb.ba)
     const roditeljEmailForRoditeljTable = roditeljEmail; // Isti email kao u Korisnik tabeli
     
     // Provjeri da li postoji majka
@@ -471,7 +472,7 @@ async function main() {
   console.log('   Muallim: muallim@emekteb.ba / password123 / PIN: 1234');
   console.log('   Učenici: ime.prezime@emekteb.ba / password123 / PIN: 2000-2009');
   console.log('   Roditelj: ahmed.hasanovic@emekteb.ba / password123');
-  console.log('   (Roditelj se loguje sa email-om djeteta, ali u bazi ima email: roditelj.ahmed.hasanovic@emekteb.ba)');
+  console.log('   (Roditelj se loguje sa email-om djeteta, ali u bazi ima email: r.ahmed.hasanovic@emekteb.ba)');
 }
 
 main()

@@ -19,19 +19,23 @@ export class AuthService {
 
     let user: any = null;
 
-    // Ako email nije u formatu roditelj.*, prvo provjeri da li postoji roditelj sa prefiksom
-    // (roditelj se loguje sa email-om djeteta, ali u bazi ima email roditelj.email@emekteb.ba)
-    if (loginDto.email.includes('@emekteb.ba') && !loginDto.email.startsWith('roditelj.')) {
-      const roditeljEmail = `roditelj.${loginDto.email}`;
-      this.logger.debug(`🔍 First checking for parent with email: ${roditeljEmail}`);
-      user = await this.prisma.korisnik.findUnique({
-        where: { email: roditeljEmail },
-      });
-      if (user && user.uloga === 'RODITELJ') {
-        this.logger.debug(`✅ Found parent: ${user.id}`);
-      } else {
-        this.logger.debug(`👤 Parent not found with email: ${roditeljEmail}`);
-        user = null;
+    // Ako email nije u formatu r.*, prvo provjeri da li postoji roditelj sa prefiksom
+    // (roditelj se loguje sa email-om djeteta, ali u bazi ima email r.ime.prezime@emekteb.ba)
+    if (loginDto.email.includes('@emekteb.ba') && !loginDto.email.startsWith('r.')) {
+      // Izvuci ime i prezime iz email-a djeteta (ime.prezime@emekteb.ba)
+      const emailParts = loginDto.email.split('@');
+      if (emailParts.length === 2 && emailParts[0]) {
+        const roditeljEmail = `r.${emailParts[0]}@${emailParts[1]}`;
+        this.logger.debug(`🔍 First checking for parent with email: ${roditeljEmail}`);
+        user = await this.prisma.korisnik.findUnique({
+          where: { email: roditeljEmail },
+        });
+        if (user && user.uloga === 'RODITELJ') {
+          this.logger.debug(`✅ Found parent: ${user.id}`);
+        } else {
+          this.logger.debug(`👤 Parent not found with email: ${roditeljEmail}`);
+          user = null;
+        }
       }
     }
 

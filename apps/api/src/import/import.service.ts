@@ -469,15 +469,32 @@ export class ImportService {
   }
 
   private async upsertRoditelji(ucenikId: string, row: CsvRow): Promise<void> {
+    // Uzmi ime i prezime učenika za generisanje emaila roditelja
+    const ucenikIme = this.getValue(row, 'ucenik_ime') || '';
+    const ucenikPrezime = this.getValue(row, 'ucenik_prezime') || '';
+    
+    // Generiši email za roditelja u formatu r.ime.prezime@emekteb.ba
+    let roditeljEmail: string | null = null;
+    if (ucenikIme && ucenikPrezime) {
+      const normalizedIme = this.normalizeString(ucenikIme);
+      const normalizedPrezime = this.normalizeString(ucenikPrezime);
+      if (normalizedIme && normalizedPrezime) {
+        roditeljEmail = `r.${normalizedIme}.${normalizedPrezime}@emekteb.ba`;
+      }
+    }
+
     // Majka
     const majkaImePrezime = this.getValue(row, 'majka_ime_prezime');
     if (majkaImePrezime) {
+      // Koristi email iz CSV-a ako postoji, inače koristi generisani email
+      const majkaEmail = this.getValue(row, 'majka_email') || roditeljEmail;
+      
       const majkaData: any = {
         tip: TipRoditelja.MAJKA,
         imePrezime: majkaImePrezime,
         datumRodjenja: this.parseValue(row['majka_datum_rodjenja'], 'datetime'),
         mjestoRodjenja: this.getValue(row, 'majka_mjesto_rodjenja'),
-        email: this.getValue(row, 'majka_email'),
+        email: majkaEmail,
         mobitel: this.getValue(row, 'majka_mobitel'),
         telefon: this.getValue(row, 'majka_telefon'),
         zaposlen: this.transformBoolean(row['majka_zaposlenost']),
@@ -503,17 +520,25 @@ export class ImportService {
           },
         });
       }
+
+      // Kreiraj Korisnik zapis za roditelja ako postoji email i već ne postoji
+      if (majkaEmail) {
+        await this.upsertRoditeljKorisnik(majkaEmail, majkaImePrezime);
+      }
     }
 
     // Otac
     const otacImePrezime = this.getValue(row, 'otac_ime_prezime');
     if (otacImePrezime) {
+      // Koristi email iz CSV-a ako postoji, inače koristi generisani email
+      const otacEmail = this.getValue(row, 'otac_email') || roditeljEmail;
+      
       const otacData: any = {
         tip: TipRoditelja.OTAC,
         imePrezime: otacImePrezime,
         datumRodjenja: this.parseValue(row['otac_datum_rodjenja'], 'datetime'),
         mjestoRodjenja: this.getValue(row, 'otac_mjesto_rodjenja'),
-        email: this.getValue(row, 'otac_email'),
+        email: otacEmail,
         mobitel: this.getValue(row, 'otac_mobitel'),
         telefon: this.getValue(row, 'otac_telefon'),
         zaposlen: this.transformBoolean(row['otac_zaposlenost']),
@@ -539,6 +564,53 @@ export class ImportService {
           },
         });
       }
+
+      // Kreiraj Korisnik zapis za roditelja ako postoji email i već ne postoji
+      if (otacEmail) {
+        await this.upsertRoditeljKorisnik(otacEmail, otacImePrezime);
+      }
+    }
+  }
+
+  private async upsertRoditeljKorisnik(email: string, imePrezime: string): Promise<void> {
+    try {
+      // Provjeri da li već postoji korisnik sa tim email-om
+      const existingKorisnik = await this.prisma.korisnik.findUnique({
+        where: { email },
+      });
+
+      if (!existingKorisnik) {
+        // Ako ne postoji, kreiraj novog korisnika sa ulogom RODITELJ
+        const defaultPassword = await bcrypt.hash('password123', 10);
+        
+        // Pokušaj izdvojiti ime i prezime iz imePrezime stringa
+        const nameParts = imePrezime.trim().split(/\s+/);
+        const ime = nameParts[0] || null;
+        const prezime = nameParts.slice(1).join(' ') || null;
+        
+        await this.prisma.korisnik.create({
+          data: {
+            email,
+            lozinka: defaultPassword,
+            ime: ime || undefined,
+            prezime: prezime || undefined,
+            uloga: 'RODITELJ',
+            aktivan: true,
+          },
+        });
+        this.logger.debug(`Kreiran novi Korisnik za roditelja sa email-om: ${email}`);
+      } else if (existingKorisnik.uloga === 'RODITELJ') {
+        // Ako već postoji kao roditelj, ništa ne treba raditi
+        this.logger.debug(`Korisnik sa email-om ${email} već postoji sa ulogom RODITELJ.`);
+        return;
+      } else {
+        // Ako postoji ali ima drugu ulogu (MUALLIM, ADMIN, UCENIK), ne mijenjaj ulogu
+        // Ovo je zaštita da ne promijenimo ulogu postojećih korisnika
+        this.logger.warn(`⚠️  Korisnik sa email-om ${email} već postoji sa ulogom ${existingKorisnik.uloga}. Ne mijenjam ulogu u RODITELJ. Email se ne koristi za roditelja.`);
+      }
+    } catch (error) {
+      // Ako email već postoji sa drugačijom ulogom ili drugi problem, samo loguj
+      this.logger.warn(`❌ Ne mogu kreirati/ažurirati Korisnik za roditelja sa email-om ${email}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -615,7 +687,7 @@ export class ImportService {
       throw new Error(`Ne mogu normalizovati ime ili prezime. Ime: "${ime}", Prezime: "${prezime}"`);
     }
     
-    const baseEmail = `${normalizedIme}.${normalizedPrezime}@grbavica2.com`;
+    const baseEmail = `${normalizedIme}.${normalizedPrezime}@emekteb.ba`;
     
     // Provjeri da li email već postoji
     let email = baseEmail;
@@ -633,7 +705,7 @@ export class ImportService {
           return email;
         }
 
-        email = `${normalizedIme}.${normalizedPrezime}${counter}@grbavica2.com`;
+        email = `${normalizedIme}.${normalizedPrezime}${counter}@emekteb.ba`;
         counter++;
         attempts++;
       } catch (error) {

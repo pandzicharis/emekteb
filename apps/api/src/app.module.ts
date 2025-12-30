@@ -17,9 +17,11 @@ import { SlobodanDanModule } from './slobodan-dan/slobodan-dan.module';
 import { DiplomaModule } from './diploma/diploma.module';
 import { AdminModule } from './admin/admin.module';
 import { RoditeljModule } from './roditelj/roditelj.module';
+import { PorukeModule } from './poruke/poruke.module';
+import { NotifikacijeModule } from './notifikacije/notifikacije.module';
 
 @Module({
-  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule, CasModule, UcenikModule, SkolaHifzaModule, ReportsModule, SlobodanDanModule, DiplomaModule, AdminModule, RoditeljModule],
+  imports: [PrismaModule, ImportModule, AuthModule, RazredModule, LekcijaModule, NastavniPlanModule, MuallimModule, NastavnaGodinaModule, CasModule, UcenikModule, SkolaHifzaModule, ReportsModule, SlobodanDanModule, DiplomaModule, AdminModule, RoditeljModule, PorukeModule, NotifikacijeModule],
   controllers: [AppController],
   providers: [AppService],
 })

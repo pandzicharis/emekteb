@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import CasEntryDrawer from '../components/CasEntryDrawer';
@@ -74,6 +75,7 @@ interface DashboardData {
 
 export default function MuallimDashboardPage() {
   const { user, isLoading: authLoading } = useAuth();
+  const navigate = useNavigate();
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +116,12 @@ export default function MuallimDashboardPage() {
   const [casExistsMap, setCasExistsMap] = useState<Map<string, boolean>>(new Map());
   // Mapa za čuvanje broja časova po datumu: key = `YYYY-MM-DD`, value = { total, completed }
   const [casoviCounts, setCasoviCounts] = useState<Record<string, { total: number; completed: number }>>({});
+  
+  // Poruke i notifikacije
+  const [messages, setMessages] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
   
   // Provjeri postojanje časa za sve slotove kada se promijeni datum ili dashboardData
   useEffect(() => {
@@ -323,6 +331,60 @@ export default function MuallimDashboardPage() {
 
     fetchCasoviCounts();
   }, [dashboardData, user]);
+
+  // Učitaj poruke i notifikacije
+  useEffect(() => {
+    const fetchMessagesAndNotifications = async () => {
+      if (!user) return;
+
+      try {
+        const token = localStorage.getItem('token');
+        
+        // Učitaj poruke
+        setMessagesLoading(true);
+        try {
+          const messagesResponse = await axios.get(`${API_URL}/poruke/primljene`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          setMessages(messagesResponse.data.slice(0, 5)); // Prikaži samo poslednjih 5
+        } catch (err) {
+          console.error('Error fetching messages:', err);
+        } finally {
+          setMessagesLoading(false);
+        }
+
+        // Učitaj notifikacije
+        setNotificationsLoading(true);
+        try {
+          const notificationsResponse = await axios.get(`${API_URL}/notifikacije`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          // Mapiranje notifikacija (API vraća tip, naslov, poruka, kreiran, procitana)
+          const mappedNotifications = notificationsResponse.data.map((notif: any) => ({
+            id: notif.id,
+            type: notif.tip?.toLowerCase() || 'general',
+            title: notif.naslov,
+            message: notif.poruka,
+            date: notif.kreiran,
+            read: notif.procitana,
+            link: notif.link || undefined,
+          }));
+          setNotifications(mappedNotifications.slice(0, 5)); // Prikaži samo poslednjih 5
+        } catch (err) {
+          console.error('Error fetching notifications:', err);
+        } finally {
+          setNotificationsLoading(false);
+        }
+      } catch (err) {
+        console.error('Error fetching messages/notifications:', err);
+      }
+    };
+
+    fetchMessagesAndNotifications();
+    // Osvježi svakih 30 sekundi
+    const interval = setInterval(fetchMessagesAndNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -2125,6 +2187,149 @@ export default function MuallimDashboardPage() {
                       })}
           </div>
         )}
+                </div>
+
+                {/* Poruke */}
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Poruke</h3>
+                    {messages.filter((m) => !m.procitana).length > 0 && (
+                      <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold text-white bg-indigo-600 rounded-full">
+                        {messages.filter((m) => !m.procitana).length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                    {messagesLoading ? (
+                      <div className="p-8 text-center text-gray-500 text-sm">Učitavanje...</div>
+                    ) : messages.length === 0 ? (
+                      <div className="p-8 text-center text-gray-500 text-sm">Nema poruka</div>
+                    ) : (
+                      <div className="divide-y divide-gray-100">
+                        {messages.map((message) => {
+                          const senderName = message.posiljalac?.ime && message.posiljalac?.prezime
+                            ? `${message.posiljalac.ime} ${message.posiljalac.prezime}`
+                            : message.posiljalac?.email || 'Nepoznato';
+                          return (
+                            <div
+                              key={message.id}
+                              className={`p-4 hover:bg-gray-50 transition-colors ${
+                                !message.procitana ? 'bg-indigo-50/50' : ''
+                              }`}
+                            >
+                              <div className="flex items-start justify-between mb-2">
+                                <p className="text-sm font-semibold text-gray-900 truncate flex-1">{senderName}</p>
+                                {!message.procitana && (
+                                  <span className="flex-shrink-0 w-2 h-2 bg-indigo-500 rounded-full mt-1.5 ml-2"></span>
+                                )}
+                              </div>
+                              <p className="text-sm font-medium text-gray-700 mb-1 truncate">{message.naslov}</p>
+                              <p className="text-xs text-gray-500">
+                                {new Date(message.kreiran).toLocaleDateString('bs-BA', {
+                                  day: 'numeric',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {messages.length > 0 && (
+                    <button
+                      onClick={() => navigate('/komunikacija')}
+                      className="mt-3 w-full text-center text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                    >
+                      Vidi sve poruke →
+                    </button>
+                  )}
+                </div>
+
+                {/* Notifikacije */}
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Obavještenja</h3>
+                    {notifications.filter((n) => !n.read).length > 0 && (
+                      <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold text-white bg-indigo-600 rounded-full">
+                        {notifications.filter((n) => !n.read).length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                    {notificationsLoading ? (
+                      <div className="p-8 text-center text-gray-500 text-sm">Učitavanje...</div>
+                    ) : notifications.length === 0 ? (
+                      <div className="p-8 text-center text-gray-500 text-sm">Nema obavještenja</div>
+                    ) : (
+                      <div className="divide-y divide-gray-100">
+                        {notifications.map((notification) => {
+                          const getNotificationIcon = (type: string) => {
+                            switch (type) {
+                              case 'ocjena':
+                                return (
+                                  <svg className="w-4 h-4 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                  </svg>
+                                );
+                              case 'prisustvo':
+                                return (
+                                  <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                );
+                              default:
+                                return (
+                                  <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                );
+                            }
+                          };
+
+                          return (
+                            <div
+                              key={notification.id}
+                              className={`p-4 hover:bg-gray-50 transition-colors ${
+                                !notification.read ? 'bg-indigo-50/50' : ''
+                              }`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="flex-shrink-0 mt-0.5">{getNotificationIcon(notification.type)}</div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">{notification.title}</p>
+                                    {!notification.read && (
+                                      <span className="flex-shrink-0 w-2 h-2 bg-indigo-500 rounded-full ml-2"></span>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-gray-600 mb-1 line-clamp-2">{notification.message}</p>
+                                  <p className="text-xs text-gray-500">
+                                    {new Date(notification.date).toLocaleDateString('bs-BA', {
+                                      day: 'numeric',
+                                      month: 'short',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {notifications.length > 0 && (
+                    <button
+                      onClick={() => navigate('/komunikacija')}
+                      className="mt-3 w-full text-center text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                    >
+                      Vidi sva obavještenja →
+                    </button>
+                  )}
                 </div>
               </>
             ) : (

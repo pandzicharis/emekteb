@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Sidebar from './components/Sidebar';
+import TopBar from './components/TopBar';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import ImportPage from './pages/ImportPage';
@@ -17,6 +18,13 @@ import YearConclusionPage from './pages/YearConclusionPage';
 import SlobodniDaniPage from './pages/SlobodniDaniPage';
 import DiplomaBuilderPage from './pages/DiplomaBuilderPage';
 import ProtectedRoute from './components/ProtectedRoute';
+import RoditeljDijeteDetailPage from './pages/RoditeljDijeteDetailPage';
+import RoditeljCalendarPage from './pages/RoditeljCalendarPage';
+import RoditeljStatisticsPage from './pages/RoditeljStatisticsPage';
+import RoditeljNotificationsPage from './pages/RoditeljNotificationsPage';
+import RoditeljProfileSettingsPage from './pages/RoditeljProfileSettingsPage';
+import RoditeljHomeworkPage from './pages/RoditeljHomeworkPage';
+import KomunikacijaPage from './pages/KomunikacijaPage';
 
 function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -47,12 +55,13 @@ function AppContent() {
 
           {/* Main Content */}
           <div
-            className={`flex-1 transition-all duration-300 ease-in-out ${
+            className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${
               isSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'
             }`}
             style={{ willChange: 'margin-left' }}
           >
-            <main className="h-full overflow-y-auto">
+            <TopBar />
+            <main className="flex-1 overflow-y-auto">
               <Routes>
                 <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
                 <Route path="/import" element={<ProtectedRoute allowedRoles={['ADMIN']}><ImportPage /></ProtectedRoute>} />
@@ -67,6 +76,14 @@ function AppContent() {
                 <Route path="/diplome-builder" element={<ProtectedRoute allowedRoles={['MUALLIM']}><DiplomaBuilderPage /></ProtectedRoute>} />
                 <Route path="/slobodni-dani" element={<ProtectedRoute allowedRoles={['ADMIN']}><SlobodniDaniPage /></ProtectedRoute>} />
                 <Route path="/settings/muallimi" element={<ProtectedRoute allowedRoles={['ADMIN']}><MuallimiPage /></ProtectedRoute>} />
+                {/* Roditelj routes */}
+                <Route path="/roditelj/dijete/:id" element={<ProtectedRoute allowedRoles={['RODITELJ']}><RoditeljDijeteDetailPage /></ProtectedRoute>} />
+                <Route path="/roditelj/kalendar" element={<ProtectedRoute allowedRoles={['RODITELJ']}><RoditeljCalendarPage /></ProtectedRoute>} />
+                <Route path="/roditelj/statistike" element={<ProtectedRoute allowedRoles={['RODITELJ']}><RoditeljStatisticsPage /></ProtectedRoute>} />
+                <Route path="/roditelj/obavjestenja" element={<ProtectedRoute allowedRoles={['RODITELJ']}><RoditeljNotificationsPage /></ProtectedRoute>} />
+                <Route path="/roditelj/zadace" element={<ProtectedRoute allowedRoles={['RODITELJ']}><RoditeljHomeworkPage /></ProtectedRoute>} />
+                <Route path="/roditelj/postavke" element={<ProtectedRoute allowedRoles={['RODITELJ']}><RoditeljProfileSettingsPage /></ProtectedRoute>} />
+                <Route path="/komunikacija" element={<ProtectedRoute><KomunikacijaPage /></ProtectedRoute>} />
                 <Route path="/login" element={<Navigate to="/" replace />} />
               </Routes>
             </main>

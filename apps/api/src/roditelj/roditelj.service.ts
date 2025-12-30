@@ -20,11 +20,11 @@ export class RoditeljService {
       throw new BadRequestException('Roditelj nema email adresu');
     }
 
-    // Email roditelja može biti u formatu roditelj.ime.prezime@emekteb.ba ili ime.prezime@emekteb.ba
-    // Ako počinje sa "roditelj.", ukloni prefiks i traži učenika
+    // Email roditelja može biti u formatu r.ime.prezime@emekteb.ba ili ime.prezime@emekteb.ba
+    // Ako počinje sa "r.", ukloni prefiks i traži učenika
     let ucenikEmail = korisnik.email;
-    if (ucenikEmail.startsWith('roditelj.')) {
-      ucenikEmail = ucenikEmail.replace(/^roditelj\./, '');
+    if (ucenikEmail.startsWith('r.')) {
+      ucenikEmail = ucenikEmail.replace(/^r\./, '');
     }
 
     // Pronađi učenika sa tim email-om
@@ -135,8 +135,8 @@ export class RoditeljService {
     // Pronađi sve učenike povezane sa ovim roditeljem
     // Koristi istu logiku kao getUcenici
     let ucenikEmail = korisnik.email;
-    if (ucenikEmail && ucenikEmail.startsWith('roditelj.')) {
-      ucenikEmail = ucenikEmail.replace(/^roditelj\./, '');
+    if (ucenikEmail && ucenikEmail.startsWith('r.')) {
+      ucenikEmail = ucenikEmail.replace(/^r\./, '');
     }
 
     const ucenikKorisnik = await this.prisma.korisnik.findFirst({

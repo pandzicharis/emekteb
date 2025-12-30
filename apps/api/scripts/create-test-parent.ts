@@ -19,7 +19,9 @@ async function main() {
   }
 
   const ucenikEmail = prviUcenik.korisnik.email; // Email djeteta (npr. ahmed.hasanovic@emekteb.ba)
-  const roditeljEmail = `roditelj.${ucenikEmail}`; // Email roditelja u bazi
+  // Email roditelja u bazi: r.ime.prezime@emekteb.ba
+  const emailParts = ucenikEmail.split('@');
+  const roditeljEmail = emailParts.length === 2 ? `r.${emailParts[0]}@${emailParts[1]}` : `r.${ucenikEmail}`;
   const password = 'password123';
   const ime = 'Roditelj';
   const prezime = prviUcenik.korisnik.prezime || 'Test';
@@ -79,7 +81,7 @@ async function main() {
   if (!roditeljZapis) {
     console.log('\n📝 Kreiranje Roditelj zapisa...');
     
-    const roditeljEmail = 'roditelj.test@emekteb.ba';
+    // Koristi isti email kao u Korisnik tabeli
     
     // Kreiraj majku
     await prisma.roditelj.create({

@@ -31,7 +31,10 @@ model Korisnik {
     azuriran           DateTime  @updatedAt
 
     // Relacije
-    ucenik Ucenik?
+    ucenik          Ucenik?
+    poslatePoruke   Poruka[]       @relation("PoslatePoruke")
+    primljenePoruke Poruka[]       @relation("PrimljenePoruke")
+    notifikacije    Notifikacija[]
 
     @@map("korisnici")
 }
@@ -639,4 +642,54 @@ model SlobodanDan {
 
     @@unique([nastavnaGodinaId, datum])
     @@map("slobodni_dani")
+}
+
+// ============================================
+// PORUKE - KOMUNIKACIJA IZMEĐU KORISNIKA
+// ============================================
+
+model Poruka {
+    id           String   @id @default(uuid())
+    posiljalacId String // Korisnik koji šalje poruku
+    primalacId   String // Korisnik koji prima poruku
+    naslov       String
+    sadrzaj      String
+    procitana    Boolean  @default(false)
+    kreiran      DateTime @default(now())
+    azuriran     DateTime @updatedAt
+
+    // Relacije
+    posiljalac Korisnik @relation("PoslatePoruke", fields: [posiljalacId], references: [id], onDelete: Cascade)
+    primalac   Korisnik @relation("PrimljenePoruke", fields: [primalacId], references: [id], onDelete: Cascade)
+
+    @@map("poruke")
+}
+
+// ============================================
+// NOTIFIKACIJE
+// ============================================
+
+enum TipNotifikacije {
+    OCJENA
+    PRISUSTVO
+    POHVALA
+    OPOMENA
+    GENERAL
+}
+
+model Notifikacija {
+    id         String          @id @default(uuid())
+    korisnikId String
+    tip        TipNotifikacije
+    naslov     String
+    poruka     String
+    link       String? // Link na stranicu (npr. /roditelj/dijete/123)
+    procitana  Boolean         @default(false)
+    kreiran    DateTime        @default(now())
+    azuriran   DateTime        @updatedAt
+
+    // Relacije
+    korisnik Korisnik @relation(fields: [korisnikId], references: [id], onDelete: Cascade)
+
+    @@map("notifikacije")
 }
