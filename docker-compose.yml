@@ -1,5 +1,6 @@
-version: '3.8'
-
+# Opcionalno: lokalna Postgres baza, ako ne želiš raditi direktno na Supabase.
+#   docker compose up -d
+# Konekcija: postgresql://postgres:postgres@localhost:5439/emekteb?schema=public
 services:
   postgres:
     image: postgres:16-alpine
@@ -9,99 +10,9 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: emekteb
     ports:
-      - "5439:5432"
+      - '5439:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d emekteb"]
-      interval: 3s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-    networks:
-      - emekteb-network
-
-  api-init:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    container_name: emekteb-api-init
-    environment:
-      NODE_ENV: development
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/emekteb?schema=public
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - emekteb-network
-    working_dir: /app/apps/api
-    command: sh /app/apps/api/scripts/init-db.sh
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /app/apps/api/node_modules
-    restart: "no"
-
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    container_name: emekteb-api
-    environment:
-      NODE_ENV: development
-      PORT: 3000
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/emekteb?schema=public
-      FRONTEND_URL: http://localhost:5173
-    ports:
-      - "3000:3000"
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /app/apps/api/node_modules
-    depends_on:
-      api-init:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    networks:
-      - emekteb-network
-    working_dir: /app/apps/api
-    command: sh -c "npx prisma generate && npm run start:dev"
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
-  web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-    container_name: emekteb-web
-    environment:
-      VITE_API_URL: http://localhost:3000
-    ports:
-      - "5173:5173"
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /app/apps/web/node_modules
-    depends_on:
-      api:
-        condition: service_healthy
-    networks:
-      - emekteb-network
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5173 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
 
 volumes:
   postgres_data:
-
-networks:
-  emekteb-network:
-    driver: bridge

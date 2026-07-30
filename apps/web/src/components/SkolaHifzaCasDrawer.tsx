@@ -6,7 +6,13 @@ import UcenikDetailsDrawer from './UcenikDetailsDrawer';
 type PrisustvoStatus = 'PRISUTAN' | 'OPRAVDAN' | 'NEOPRAVDAN';
 
 type Lekcija = { id: string; naslov: string; brojAjeta?: number };
-type Student = { id: string; ime: string; prezime: string; godinaRodjenja?: number | null };
+type Student = {
+  id: string;
+  ime: string;
+  prezime: string;
+  fotografija?: string | null;
+  godinaRodjenja?: number | null;
+};
 
 interface Napredak {
   [suraName: string]: number[]; // Array of learned ajeta numbers

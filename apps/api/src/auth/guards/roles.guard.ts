@@ -7,7 +7,11 @@ export class RolesGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const requiredRoles = this.reflector.get<Uloga[]>('roles', context.getHandler());
+    // @Roles() na metodi ima prednost, ali se čita i sa kontrolera (cijeli kontroler zaštićen).
+    const requiredRoles = this.reflector.getAllAndOverride<Uloga[]>('roles', [
+      context.getHandler(),
+      context.getClass(),
+    ]);
     if (!requiredRoles) {
       return true;
     }

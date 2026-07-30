@@ -10,6 +10,7 @@ import SetupNastavnaGodinaPage from './pages/SetupNastavnaGodinaPage';
 import NastavniPlanPage from './pages/NastavniPlanPage';
 import UpravljanjeLekcijamaPage from './pages/UpravljanjeLekcijamaPage';
 import MuallimiPage from './pages/MuallimiPage';
+import BazaPodatakaPage from './pages/BazaPodatakaPage';
 import CasoviPage from './pages/CasoviPage';
 import UceniciPage from './pages/UceniciPage';
 import SkolaHifzaPage from './pages/SkolaHifzaPage';
@@ -76,6 +77,7 @@ function AppContent() {
                 <Route path="/diplome-builder" element={<ProtectedRoute allowedRoles={['MUALLIM']}><DiplomaBuilderPage /></ProtectedRoute>} />
                 <Route path="/slobodni-dani" element={<ProtectedRoute allowedRoles={['ADMIN']}><SlobodniDaniPage /></ProtectedRoute>} />
                 <Route path="/settings/muallimi" element={<ProtectedRoute allowedRoles={['ADMIN']}><MuallimiPage /></ProtectedRoute>} />
+                <Route path="/settings/baza" element={<ProtectedRoute allowedRoles={['ADMIN']}><BazaPodatakaPage /></ProtectedRoute>} />
                 {/* Roditelj routes */}
                 <Route path="/roditelj/dijete/:id" element={<ProtectedRoute allowedRoles={['RODITELJ']}><RoditeljDijeteDetailPage /></ProtectedRoute>} />
                 <Route path="/roditelj/kalendar" element={<ProtectedRoute allowedRoles={['RODITELJ']}><RoditeljCalendarPage /></ProtectedRoute>} />

@@ -1,136 +1,102 @@
-# E-Mekteb Monorepo
+# E-Mekteb
 
-Monorepo za E-Mekteb aplikaciju koja uključuje API, web frontend i mobile aplikaciju.
+Monorepo sa dvije aplikacije:
 
-## Struktura
+| Dio          | Folder     | Tehnologija     | Deploy   |
+| ------------ | ---------- | --------------- | -------- |
+| **Backend**  | `apps/api` | NestJS + Prisma | Render   |
+| **Frontend** | `apps/web` | React + Vite    | Vercel   |
+| **Baza**     | -          | PostgreSQL      | Supabase |
 
-```
-emekteb/
-├── apps/
-│   ├── api/          # Backend API (NestJS)
-│   ├── web/          # Frontend web aplikacija (React + Vite)
-│   └── mobile/       # Mobile aplikacija (React Native/Flutter)
-├── packages/
-│   ├── shared-types/ # Dijeljeni TypeScript tipovi
-│   └── shared-utils/ # Dijeljene utility funkcije
-├── docker-compose.yml # Docker Compose konfiguracija
-└── Makefile          # Make komande za upravljanje
-```
+---
 
-## 🚀 Quick Start
+## Lokalno pokretanje
 
-### Prerequisites
-
-- Docker & Docker Compose
-- Make (opcionalno, ali preporučeno)
-- Node.js 20+ (samo za lokalni development bez Docker-a)
-
-### Pokretanje aplikacije
-
-1. **Instaliraj dependencies:**
-   ```bash
-   make install
-   ```
-
-2. **Pokreni sve servise (database, API, frontend):**
-   ```bash
-   make run
-   ```
-
-3. **Pristup aplikacijama:**
-   - Frontend: http://localhost:5173
-   - API: http://localhost:3000
-   - API Health Check: http://localhost:3000/health
-   - Database: localhost:5432
-
-## 📋 Make Komande
+Jednom, na početku:
 
 ```bash
-make help      # Prikaži sve dostupne komande
-make install   # Instaliraj dependencies
-make run       # Pokreni sve servise
-make down      # Zaustavi sve servise
-make build     # Build Docker images
-make rebuild   # Rebuild i restart servisa
-make logs      # Prikaži logove svih servisa
-make logs-api  # Prikaži samo API logove
-make logs-web  # Prikaži samo frontend logove
-make logs-db   # Prikaži samo database logove
-make restart   # Restart svih servisa
-make clean     # Zaustavi servise i ukloni volumes
+npm install
+cp apps/api/.env.example apps/api/.env     # backend env (baza, JWT, admin)
+cp apps/web/.env.example apps/web/.env     # frontend env (adresa API-ja)
+docker compose up -d                       # opcionalno: lokalni Postgres na portu 5439
+npm run db:deploy                          # primijeni migracije
 ```
 
-## 🔥 Hot Reload
-
-Oba servisa (API i frontend) imaju omogućen hot reload:
-- **API**: Automatski restartuje se na promjene u `apps/api/src/`
-- **Frontend**: Automatski se osvježava na promjene u `apps/web/src/`
-
-## 🗄️ Database
-
-PostgreSQL baza podataka je pokrenuta u Docker kontejneru:
-- **Host**: localhost (ili `postgres` iz Docker network-a)
-- **Port**: 5432
-- **Database**: emekteb
-- **Username**: postgres
-- **Password**: postgres
-
-## 📦 Packages
-
-### Shared Types (`@emekteb/shared-types`)
-
-Dijeljeni TypeScript tipovi koji se koriste u API-ju, web-u i mobile aplikaciji.
-
-```typescript
-import { User, UserRole, ApiResponse } from '@emekteb/shared-types';
-```
-
-### Shared Utils (`@emekteb/shared-utils`)
-
-Dijeljene utility funkcije.
-
-```typescript
-import { formatDate, isValidEmail } from '@emekteb/shared-utils';
-```
-
-## 🛠️ Development
-
-### Lokalni development (bez Docker-a)
-
-Ako želiš raditi lokalno bez Docker-a:
+Zatim, svaki put - dva terminala:
 
 ```bash
-# Terminal 1: Database (trebaš lokalno instaliran PostgreSQL)
-# Terminal 2: API
-npm run start:api
-
-# Terminal 3: Frontend
-npm run start:web
+npm run dev:api      # backend  -> http://localhost:3000
+npm run dev:web      # frontend -> http://localhost:5173
 ```
 
-### Dodavanje novih dependencies
+Prijava: `admin@emekteb.ba` / `password123` (mijenja se kroz `ADMIN_*` u `apps/api/.env`).
+Admin račun i osnovni razredi (Razred 1-9, Škola Hifza) kreiraju se automatski na startu
+API-ja ako ne postoje. Baza je inače prazna - učenici se uvoze CSV-om iz admin panela.
+
+Ako radiš direktno na Supabase bazi, ne treba ti Docker - samo upiši Supabase konekcije u
+`apps/api/.env`.
+
+### Korisne komande
 
 ```bash
-# Za API
-npm install <package> --workspace=@emekteb/api
-
-# Za Frontend
-npm install <package> --workspace=@emekteb/web
-
-# Za shared packages
-npm install <package> --workspace=@emekteb/shared-types
+npm run db:migrate     # nova migracija (nakon promjene schema.prisma)
+npm run db:deploy      # primijeni postojeće migracije
+npm run db:generate    # regeneriši Prisma Client
+npm run db:studio      # Prisma Studio (pregled baze)
+npm run build:api      # produkcijski build backenda
+npm run build:web      # produkcijski build frontenda (uključuje typecheck)
 ```
 
-## 🐳 Docker Services
+---
 
-- **postgres**: PostgreSQL 16 database
-- **api**: NestJS backend server (port 3000)
-- **web**: React frontend (port 5173)
+## Deploy
 
-Svi servisi su povezani preko Docker network-a `emekteb-network`.
+### 1. Baza - Supabase (free)
 
-## 📝 Notes
+1. [supabase.com](https://supabase.com) → New project (region: Frankfurt / Central EU).
+2. Project Settings → Database → Connection string, uzmi dvije konekcije:
+   - **Transaction pooler** (port `6543`) → `DATABASE_URL`, dodaj
+     `?pgbouncer=true&connection_limit=1`
+   - **Direct connection / Session pooler** (port `5432`) → `DIRECT_URL` (za migracije)
 
-- Database volume se čuva u `postgres_data` volume-u
-- Hot reload radi preko volume mount-ova
-- Svi servisi se automatski restartuju na promjene koda
+> Free Supabase projekt se pauzira nakon ~7 dana neaktivnosti; iz dashboarda se vraća jednim klikom.
+
+### 2. Backend - Render (free)
+
+1. [render.com](https://render.com) → New → **Blueprint** → odaberi ovaj repo (čita `render.yaml`).
+2. Popuni env varijable: `DATABASE_URL`, `DIRECT_URL`, `FRONTEND_URL`, `ADMIN_EMAIL`,
+   `ADMIN_PASSWORD` (`JWT_SECRET` Render generiše sam).
+3. Deploy. Migracije se primjenjuju automatski na svakom startu.
+4. Provjera: `https://<tvoj-api>.onrender.com/health`
+
+> Free instanca se uspava nakon ~15 min neaktivnosti - prvi request nakon toga traje
+> 30-60 sekundi. Starter plan ($7/mj) uklanja uspavljivanje.
+> Uploadovane fotografije (`uploads/`) se na free planu gube pri redeployu.
+
+### 3. Frontend - Vercel (free)
+
+1. [vercel.com](https://vercel.com) → Add New Project → odaberi ovaj repo
+   (`vercel.json` u rootu već definiše build).
+2. Environment Variables → `VITE_API_URL` = adresa Render API-ja
+   (npr. `https://emekteb-api.onrender.com`).
+3. Deploy.
+4. Vrati se na Render i u `FRONTEND_URL` upiši Vercel domen. Za preview deploymente
+   dodaj i wildcard: `https://emekteb.vercel.app,*.vercel.app`
+
+> `VITE_API_URL` se upisuje u build - nakon promjene te varijable treba novi deploy.
+
+---
+
+## Admin panel
+
+- **Učenici → Import** - upload CSV-a s učenicima (jedini način unosa učenika).
+  Očekivane kolone vraća `GET /import/mapping`, historija importa `GET /import`.
+- **Postavke → Baza podataka** - stanje baze po tabelama i **brisanje svih podataka**
+  (truncate). Traži potvrdu `OBRISI SVE`; opcija "Zadrži admin korisnike" uključena je
+  po defaultu. Struktura baze i migracije ostaju nepromijenjene.
+  Endpoint se može onemogućiti sa `ALLOW_DB_TRUNCATE=false`.
+
+## Env varijable
+
+Backend `apps/api/.env`, frontend `apps/web/.env` - popis i opisi su u `.env.example`
+fajlovima u tim folderima.

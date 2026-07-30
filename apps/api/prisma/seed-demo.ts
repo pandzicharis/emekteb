@@ -371,7 +371,7 @@ async function main() {
 
   if (!existingAdmin || !existingMuallim || !existingMuallim.ucenik) {
     console.log('❌ Osnovni seed nije pokrenut!');
-    console.log('   Molimo prvo pokrenite: npm run prisma:seed\n');
+    console.log('   Molimo prvo pokrenite: npm run seed:demo\n');
     process.exit(1);
   }
 

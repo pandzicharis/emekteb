@@ -3,13 +3,15 @@
 
 generator client {
     provider      = "prisma-client-js"
-    binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
+    binaryTargets = ["native", "linux-arm64-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
     provider = "postgresql"
-    // url      = "postgresql://postgres:postgres@localhost:5439/emekteb?schema=public"
-    url      = env("DATABASE_URL")
+    // DATABASE_URL  = konekcija koju koristi aplikacija (na Supabase: pooler, port 6543)
+    // DIRECT_URL    = direktna konekcija za migracije (na Supabase: port 5432)
+    url       = env("DATABASE_URL")
+    directUrl = env("DIRECT_URL")
 }
 
 // ============================================

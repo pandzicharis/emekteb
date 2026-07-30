@@ -3,24 +3,63 @@ import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from '@nestjs/common';
 import { join } from 'path';
-import * as fs from 'fs';
-import { ImportService } from './import/import.service';
+import * as dotenv from 'dotenv';
 
-// Set default DATABASE_URL if not provided
-if (!process.env['DATABASE_URL']) {
-  process.env['DATABASE_URL'] = 'postgresql://postgres:postgres@localhost:5439/emekteb?schema=public';
-}
+// Lokalni razvoj: pročitaj apps/api/.env (komande se pokreću iz apps/api).
+// Na hostingu varijable dolaze iz okruženja i ovo ništa ne mijenja.
+dotenv.config({ path: join(process.cwd(), '.env') });
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  
+
+  if (!process.env['DATABASE_URL']) {
+    throw new Error(
+      'DATABASE_URL nije postavljen. Postavi ga u .env (lokalno) ili u env varijablama hostinga.',
+    );
+  }
+
+  if (process.env['NODE_ENV'] === 'production' && !process.env['JWT_SECRET']) {
+    throw new Error('JWT_SECRET je obavezan u produkciji.');
+  }
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+    logger:
+      process.env['NODE_ENV'] === 'production'
+        ? ['error', 'warn', 'log']
+        : ['error', 'warn', 'log', 'debug', 'verbose'],
   });
-  
-  // Enable CORS for frontend
+
+  // CORS - lista dozvoljenih originâ iz FRONTEND_URL (odvojeni zapetom).
+  // Podržan je i wildcard po domenu, npr. "*.vercel.app" za Vercel preview deploymente.
+  const allowedOrigins = (process.env['FRONTEND_URL'] || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  const isOriginAllowed = (origin: string): boolean =>
+    allowedOrigins.some((allowed) => {
+      if (allowed === '*') return true;
+      if (allowed.startsWith('*.')) {
+        const suffix = allowed.slice(1); // "*.vercel.app" -> ".vercel.app"
+        try {
+          return new URL(origin).hostname.endsWith(suffix);
+        } catch {
+          return false;
+        }
+      }
+      return allowed === origin;
+    });
+
   app.enableCors({
-    origin: process.env['FRONTEND_URL'] || 'http://localhost:5173',
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      // Bez origin headera (curl, health check, server-to-server) - dozvoli.
+      if (!origin || isOriginAllowed(origin)) {
+        callback(null, true);
+        return;
+      }
+      logger.warn(`⛔ CORS: origin "${origin}" nije u FRONTEND_URL listi`);
+      callback(new Error('Origin nije dozvoljen (CORS)'));
+    },
     credentials: true,
   });
 
@@ -29,34 +68,11 @@ async function bootstrap() {
     prefix: '/uploads',
   });
 
-  // Auto-import CSV file if it exists
-  try {
-    const csvPath = join(process.cwd(), 'setup', 'baza_ucenika 20251206-232836.csv');
-    if (fs.existsSync(csvPath)) {
-      logger.log('📥 Pronađen CSV fajl, pokrećem automatski import...');
-      const importService = app.get(ImportService);
-      
-      const fileBuffer = fs.readFileSync(csvPath);
-      const file = {
-        buffer: fileBuffer,
-        originalname: 'baza_ucenika 20251206-232836.csv',
-        mimetype: 'text/csv',
-      };
-      
-      const result = await importService.importCsv(file);
-      logger.log(`✅ CSV import završen: ${result.novih} novih, ${result.updateanih} ažuriranih, ${result.gresaka} grešaka`);
-    } else {
-      logger.log(`ℹ️  CSV fajl nije pronađen na: ${csvPath}`);
-    }
-  } catch (error) {
-    logger.warn(`⚠️  Greška pri automatskom importu CSV: ${error instanceof Error ? error.message : String(error)}`);
-    // Ne zaustavljaj aplikaciju ako import ne uspije
-  }
+  const port = Number(process.env['PORT']) || 3000;
+  await app.listen(port, '0.0.0.0');
 
-  const port = process.env['PORT'] || 3000;
-  await app.listen(port);
-  
-  logger.log(`🚀 API server is running on: http://localhost:${port}`);
+  logger.log(`🚀 API sluša na portu ${port}`);
+  logger.log(`🌐 Dozvoljeni CORS origini: ${allowedOrigins.join(', ')}`);
 }
 
 bootstrap();

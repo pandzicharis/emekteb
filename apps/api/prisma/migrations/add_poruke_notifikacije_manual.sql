@@ -40,3 +40,6 @@ ALTER TABLE "poruke" ADD CONSTRAINT "poruke_primalacId_fkey" FOREIGN KEY ("prima
 ALTER TABLE "notifikacije" ADD CONSTRAINT "notifikacije_korisnikId_fkey" FOREIGN KEY ("korisnikId") REFERENCES "korisnici"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 
+
+
+

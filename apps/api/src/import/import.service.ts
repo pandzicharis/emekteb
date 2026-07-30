@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { parse } from 'csv-parse/sync';
-import * as fs from 'fs';
-import * as path from 'path';
 import * as bcrypt from 'bcryptjs';
 import { Spol, StatusUcenika, TipRoditelja, TipKontakta, StatusImporta } from '@prisma/client';
+// Mapiranje CSV kolona je dio bundle-a (nema čitanja s diska) da import radi
+// isto lokalno, u Docker-u i na hostingu.
+import csvFieldMapping from './csv-field-mapping.json';
+import csvFieldMappingMetadata from './csv-field-mapping-metadata.json';
 
 interface CsvRow {
   [key: string]: string;
@@ -27,41 +29,45 @@ interface ImportLog {
 @Injectable()
 export class ImportService {
   private readonly logger = new Logger(ImportService.name);
-  private mapping: any;
-  private metadata: any;
+  private readonly mapping: any = csvFieldMapping;
+  private readonly metadata: any = csvFieldMappingMetadata;
 
-  constructor(private prisma: PrismaService) {
-    // Učitaj mapiranje - koristi putanju koja radi i u Docker-u i lokalno
-    const basePath = process.cwd();
-    const possiblePaths = [
-      path.join(basePath, 'apps/api/prisma/csv-field-mapping.json'),
-      path.join(__dirname, '../../prisma/csv-field-mapping.json'),
-      path.join(__dirname, '../../../apps/api/prisma/csv-field-mapping.json'),
-    ];
-    
-    let mappingPath: string | null = null;
-    let metadataPath: string | null = null;
-    
-    for (const possiblePath of possiblePaths) {
-      if (fs.existsSync(possiblePath)) {
-        mappingPath = possiblePath;
-        metadataPath = possiblePath.replace('csv-field-mapping.json', 'csv-field-mapping-metadata.json');
-        break;
-      }
-    }
-    
-    if (!mappingPath || !metadataPath || !fs.existsSync(mappingPath) || !fs.existsSync(metadataPath)) {
-      throw new Error(`Ne mogu pronaći CSV mapping fajlove. Tražene putanje: ${possiblePaths.join(', ')}`);
-    }
-    
-    try {
-      this.mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf-8'));
-      this.metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-      this.logger.log(`✅ CSV mapping fajlovi učitani: ${mappingPath}`);
-    } catch (error) {
-      this.logger.error(`❌ Greška pri učitavanju mapping fajlova: ${error}`);
-      throw new Error('Ne mogu učitati CSV mapping konfiguraciju');
-    }
+  constructor(private prisma: PrismaService) {}
+
+  /** Kolone koje CSV mora imati da bi import imao smisla. */
+  private readonly obavezneKolone = ['id', 'ucenik_ime', 'ucenik_prezime'];
+
+  /** Očekivana struktura CSV-a (za prikaz u admin UI-u). */
+  getMapping(): { obavezneKolone: string[]; kolone: string[]; mapiranje: Record<string, string> } {
+    return {
+      obavezneKolone: this.obavezneKolone,
+      kolone: Object.keys(this.mapping),
+      mapiranje: this.mapping,
+    };
+  }
+
+  /** Historija importa (najnoviji prvi). */
+  async getImports(limit = 20) {
+    return this.prisma.import.findMany({
+      orderBy: { kreiran: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        nazivFajla: true,
+        status: true,
+        ukupnoRedova: true,
+        uspjesnoSacuvano: true,
+        novih: true,
+        updateanih: true,
+        gresaka: true,
+        kreiran: true,
+      },
+    });
+  }
+
+  /** Detalji jednog importa, uključujući logove grešaka. */
+  async getImportById(id: string) {
+    return this.prisma.import.findUnique({ where: { id } });
   }
 
   async importCsv(file: any): Promise<any> {
@@ -89,6 +95,19 @@ export class ImportService {
         skip_empty_lines: true,
         trim: true,
       });
+
+      if (records.length === 0) {
+        throw new Error('CSV fajl je prazan (nema redova s podacima)');
+      }
+
+      const koloneUFajlu = Object.keys(records[0]);
+      const nedostajuceKolone = this.obavezneKolone.filter((kolona) => !koloneUFajlu.includes(kolona));
+      if (nedostajuceKolone.length > 0) {
+        throw new Error(
+          `CSV fajlu nedostaju obavezne kolone: ${nedostajuceKolone.join(', ')}. ` +
+            `Očekivane kolone možeš vidjeti na GET /import/mapping.`,
+        );
+      }
 
       await this.prisma.import.update({
         where: { id: importRecord.id },

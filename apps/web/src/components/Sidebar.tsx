@@ -304,6 +304,17 @@ const getMenuItems = (uloga: string, hasSkolaHifza: boolean = false, ucenici: Ar
             </svg>
           ),
         },
+        {
+          path: '/settings/baza',
+          name: 'Baza podataka',
+          icon: (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7c0-1.657 3.582-3 8-3s8 1.343 8 3-3.582 3-8 3-8-1.343-8-3z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 1.657 3.582 3 8 3s8-1.343 8-3V7" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12c0 1.657 3.582 3 8 3s8-1.343 8-3" />
+            </svg>
+          ),
+        },
       ],
     });
   }

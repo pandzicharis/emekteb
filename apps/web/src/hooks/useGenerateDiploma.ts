@@ -192,7 +192,7 @@ export default function useGenerateDiploma() {
         if (fields.length > 0) {
           // Form fields were found and filled
           const pdfBytes = await pdfDoc.save();
-          const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+          const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
           const url = URL.createObjectURL(blob);
           setPreviewUrl(url);
           setLoading(false);
@@ -265,7 +265,7 @@ export default function useGenerateDiploma() {
       const pdfBytes = await pdfDoc.save();
 
       // Create blob URL for preview
-      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
     } catch (error) {

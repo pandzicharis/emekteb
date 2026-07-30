@@ -1,0 +1,43 @@
+# Render Blueprint za E-Mekteb API (NestJS).
+# Baza je vanjska (Supabase Postgres), frontend je na Vercelu.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> odaberi ovaj repo.
+# Nakon kreiranja servisa popuni env varijable označene sa sync: false.
+services:
+  - type: web
+    name: emekteb-api
+    runtime: node
+    plan: free # free instanca se uspava nakon ~15 min neaktivnosti (prvi request traje duže)
+    region: frankfurt
+    rootDir: .
+    buildCommand: npm install --include=dev && npm run db:generate && npm run build:api
+    # Migracije se primjenjuju na svakom startu (idempotentno), pa tek onda starta API.
+    startCommand: npm run start:api
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: '20'
+      # Supabase -> Project Settings -> Database -> Connection string
+      # DATABASE_URL: "Transaction pooler" (port 6543) + &pgbouncer=true&connection_limit=1
+      - key: DATABASE_URL
+        sync: false
+      # DIRECT_URL: "Direct connection" / "Session pooler" (port 5432) - koristi se za migracije
+      - key: DIRECT_URL
+        sync: false
+      # Dozvoljeni frontend origini, odvojeni zapetom. Wildcard po domenu je podržan:
+      # https://emekteb.vercel.app,*.vercel.app
+      - key: FRONTEND_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      # Kredencijali admin računa koji se kreira ako baza nema nijednog admina.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # Postavi na "false" ako želiš onemogućiti truncate iz admin panela.
+      - key: ALLOW_DB_TRUNCATE
+        value: 'true'

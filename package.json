@@ -3,15 +3,21 @@
   "version": "0.0.1",
   "private": true,
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/api",
+    "apps/web",
+    "packages/shared-types",
+    "packages/shared-utils"
   ],
   "scripts": {
-    "install:all": "npm install",
-    "start:api": "npm run start:dev --workspace=@emekteb/api",
-    "start:web": "npm run dev --workspace=@emekteb/web",
-    "build:api": "npm run build --workspace=@emekteb/api",
-    "build:web": "npm run build --workspace=@emekteb/web"
+    "dev:api": "cd apps/api && nest start --watch --webpack",
+    "dev:web": "cd apps/web && vite",
+    "build:api": "cd apps/api && nest build",
+    "build:web": "cd apps/web && tsc -p tsconfig.app.json --noEmit && vite build",
+    "start:api": "cd apps/api && prisma migrate deploy && node dist/main.js",
+    "db:generate": "cd apps/api && prisma generate",
+    "db:migrate": "cd apps/api && prisma migrate dev",
+    "db:deploy": "cd apps/api && prisma migrate deploy",
+    "db:studio": "cd apps/api && prisma studio"
   },
   "engines": {
     "node": ">=20.0.0",

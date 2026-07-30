@@ -61,11 +61,12 @@ type StepData = {
   tipoviLekcija: {
     [razredId: string]: TipLekcije[];
   };
-  // Generirane lekcije za Kuran i Sufara po razredu
+  // Generirane lekcije za Kuran, Sufaru i Školu Hifza po razredu
   generiraneLekcije: {
     [razredId: string]: {
       KURAN?: Lekcija[];
       SUFARA?: Lekcija[];
+      SKOLA_HIFZA?: Lekcija[];
     };
   };
   // Odabrane lekcije iz Kuran/Sufara/SkolaHifza po razredu

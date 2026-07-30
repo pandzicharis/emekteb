@@ -14,7 +14,7 @@ async function main() {
   });
 
   if (!prviUcenik || !prviUcenik.korisnik || !prviUcenik.korisnik.email) {
-    console.error('❌ Nema učenika u bazi. Prvo pokrenite seed: npm run prisma:seed');
+    console.error('❌ Nema učenika u bazi. Prvo pokrenite seed: npm run seed:demo');
     return;
   }
 
