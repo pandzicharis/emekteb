@@ -57,8 +57,12 @@ async function bootstrap() {
         callback(null, true);
         return;
       }
-      logger.warn(`⛔ CORS: origin "${origin}" nije u FRONTEND_URL listi`);
-      callback(new Error('Origin nije dozvoljen (CORS)'));
+      // Ne bacamo Error (to bi dalo 500 koji sakrije pravi razlog) - origin samo
+      // ne dobije CORS header, pa ga browser blokira sa jasnom CORS porukom.
+      logger.warn(
+        `⛔ CORS: origin "${origin}" nije u FRONTEND_URL listi (${allowedOrigins.join(', ')})`,
+      );
+      callback(null, false);
     },
     credentials: true,
   });
